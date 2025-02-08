@@ -1,0 +1,520 @@
+---
+title: "20241015_insilico_mixes_withFigs"
+author: "SBK"
+date: "10/15/2024"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+---
+## SECTION 1: SETTING UP ENVIRONMENT in R
+
+```{r}
+graphics.off()
+rm(list=ls())
+knitr::opts_chunk$set(fig.width=8, fig.height=6,dpi=300,
+                      echo=FALSE, warning=FALSE, message=FALSE)
+knitr::opts_chunk$set(dev.args=list(bg="transparent"))
+ROOT_DIR<-"/fh/fast/furlan_s/user/skanaan/scrHLAtyping"
+stem<-"_R_ANALYSES/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl"
+DATA_DIR <- file.path(ROOT_DIR, stem, "data")      # SPECIFY HERE
+RES_DIR  <- file.path(ROOT_DIR,  stem, "res")     # SPECIFY HERE
+RMD_DIR  <- file.path(ROOT_DIR, stem, "rmd")     # SPECIFY HERE
+CDS_DIR <- file.path(ROOT_DIR, stem, "cds")
+FIG_DIR <- file.path(ROOT_DIR,  stem, "figs")
+
+## if you haven't already:
+remotes::install_github("https://github.com/furlan-lab/scrHLAmatrix", upgrade = "never", auth_token="<until_scrHLAmatrix_becomes_public,_use_your_token_here>")
+## make sure leiden and its python dependencies are installed:
+# reticulate::install_python(version = '<version>') #example '3.8.2'
+# reticulate::py_install('python-igraph')
+# reticulate::py_install('leidenalg', forge = TRUE)
+# reticulate::py_config()
+
+suppressPackageStartupMessages({
+  library(stringr)
+  library(pbmcapply)
+  library(parallel)
+  library(Matrix)
+  library(magrittr)
+  library(htmltools)
+  library(ggplot2)
+  library(Seurat)
+  library(dplyr)
+  library(cowplot)
+  library(Biostrings)
+  library(data.table)
+  library(IRanges)
+  library(S4Vectors)
+  library(uwot)
+  library(gridExtra)
+  library(tidyr)
+  library(viridis)
+  library(crayon)
+  library(reticulate)
+  library(viewmastR)
+  library(scCustomize)
+  library(Polychrome)
+  library(ggh4x)
+  library(muscat)
+  # library(ComplexHeatmap)
+  # library(scrubletR)
+  library(scrHLAmatrix)
+})
+packageVersion("scrHLAmatrix")
+options(warn=-1) #to suppress warnings globaly. options(warn=0) to get them back
+
+## color palette
+bmcols <- viewmastR::sfc(16)[c(1:3, 5:16)]
+names(bmcolsl)<-c("01_HSC", "02_Early_Erythroid","03_Late_Erythroid","04_Myeloid_Progenitor","05_Lymphoid_Progenitor","06_pDC","07_cDC","08_CD14_Monocyte","09_CD16_Monocyte","10_Other","11_Pre_B","12_B", "13_Plasma","14_T" ,"15_NK")
+
+```
+## SECTION 2: LOAD SEURAT DATA AND SELECT BARCODES FOR IN SCILICO MIXES in R
+
+```{r}
+## a list of pre-processed and saved Seurat objects:
+rds <- c("221010_DB1_addmutations.RDS",                 #1
+         "220926_seuratObj_TN1_celltype_genotype.RDS",  #2
+         "220526_seuratObj_TN2.RDS",                    #3
+         "230309_TN3_SeuObj_Genotype.RDS",              #4
+         "220816_seuratObj_NB1.RDS",                    #5
+         "221010_WC1_subset_infercnv.RDS",              #6
+         "240223_CHLA1_Seu_celltype_geno.RDS"           #7
+         )          
+names(rds) <- c("AML_101", "AML_401", "AML_402", "AML_403", "AML_601", "AML_801", "AML_1501")
+samp <- 2
+
+seu<-readRDS(file.path(CDS_DIR, rds[samp]))
+
+## Extract the barcodes from the Seurat Objects which you will use later to subset the long-read HLA-enriched BAMs 
+
+soup <- "Recipient" # do this with "Recipient" and "Donor" as needed
+v <- colnames(subset(x = seu, subset = geno == soup))
+rv <- unlist(lapply(v, function(x) intToUtf8(rev(utf8ToInt(x)))))
+cbrv <- gsub("^[^ATGC]*([ATGC]+).*", "\\1", rv)
+cbrv <- unlist(lapply(cbrv, function(x) intToUtf8(rev(utf8ToInt(x)))))
+
+write(unique(cbrv), file.path(DATA_DIR, paste0(names(rds)[samp], "_filter_CB_", soup, ".txt")))
+
+# repeat the barcode extraction for:
+# AML_401 donor barcodes,
+# AML_401 recipient barcodes,
+# AML_801 donor barcodes,
+# AML_801 recipient barcodes,
+# AML_101 donor barcodes, 
+# AML_601 donor barcodes.
+
+```
+## SECTION 3: MAKING IN SILICO MIXES and RUNNING scrHLAtag (unsupervised iteration)
+
+```{bash}
+##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
+
+## load modules
+ml SAMtools/1.16.1-GCC-11.2.0
+
+## locate directories of BAM files
+export out_dir=/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl
+export cb_list_dir=/fh/fast/furlan_s/user/skanaan/scrHLAtyping/_R_ANALYSES/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/data
+export test_dir=${out_dir}/inscilico_mixes
+mkdir -p $test_dir
+export COR=1
+
+export BAM=(${out_dir}/5_E01/*[12]/*corrected.bam) # AML_101
+export BAM=(${out_dir}/5_E01/*[38]/*corrected.bam) # AML_401 
+export BAM=(${out_dir}/7_G01/*[12]/*corrected.bam) # AML_601
+export BAM=(${out_dir}/8_H01/*/*corrected.bam)     # AML_801
+ls -asl ${BAM[@]}
+
+## subset by barcode the corrected.bam of a preselected set of samples
+export smpl=AML_401_filter_CB_Donor
+export smpl=AML_401_filter_CB_Recipient
+export smpl=AML_101_filter_CB_Donor
+export smpl=AML_601_filter_CB_Donor
+export smpl=AML_801_filter_CB_Donor
+export smpl=AML_801_filter_CB_Recipient
+
+## use samtools to subset BAMs based on the list of barcodes provided in SECTION 2
+for ibam in ${BAM[@]}; do
+    export ibam=$ibam
+    bamdir=`dirname $ibam`
+    in_dir=`basename $bamdir`
+    export out_subdir=${test_dir}/${smpl}/${in_dir}
+    mkdir -p $out_subdir
+    export FILTER=${cb_list_dir}/${smpl}.txt
+    export FBAM=${out_subdir}/pacbio.CBfiltered.corrected.bam
+    cd $out_subdir
+    #rm -R *
+    sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools view --threads $COR -D CB:$FILTER $ibam -h -b -o $FBAM &&
+    samtools index $FBAM'
+done
+squeue -u skanaan
+
+## Repeat the steps above until all the 6 subsetted BAM files are created.
+
+## use mergebams to create the in-silico mixtures:
+# merging bams with 3 chimeric entities
+export samps=(AML401.dn.BM AML401.dn.34 AML401.rp.BM AML401.rp.34 AML801.rp.BM AML801.rp.34)
+export smpl1=AML_401_filter_CB_Donor
+export smpl2=AML_401_filter_CB_Recipient
+export smpl3=AML_801_filter_CB_Recipient
+#export smpl4=AML_801_filter_CB_Donor
+#export smpl5=AML_101_filter_CB_Donor
+#export smpl6=AML_601_filter_CB_Donor
+printf '%s\n' "${samps[@]}"
+
+export BAM=(${test_dir}/${smpl1}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl2}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl3}/*/pacbio.CBfiltered.corrected.bam)
+#export BAM+=(${test_dir}/${smpl4}/*/pacbio.CBfiltered.corrected.bam)
+#export BAM+=(${test_dir}/${smpl5}/*/pacbio.CBfiltered.corrected.bam)
+#export BAM+=(${test_dir}/${smpl6}/*/pacbio.CBfiltered.corrected.bam)
+export LAB=()
+for samp in "${samps[@]}"; do
+    export LAB+=("${samp}-")
+done
+printf '%s\n' "${LAB[@]}"
+printf '%s\n' "${BAM[@]}"
+ls -asl ${BAM[@]}
+
+export MERGE=${test_dir}/mergeA401_dn_rp_A801_rp
+mkdir -p $MERGE
+cd $MERGE
+export bams=$(IFS=, ; echo "${BAM[*]}")
+export labels=$(IFS=, ; echo "${LAB[*]}")
+printf '%s\n' "${bams[@]}"
+printf '%s\n' "${labels[@]}"
+
+sbatch -n 1 -c 1 -p campus-new --mem-per-cpu=21000MB --wrap='~/develop/mergebams/target/release/mergebams\
+          -i $bams \
+          -l $labels \
+          -o $MERGE'
+squeue -u skanaan
+
+export MBAM=$MERGE/out_bam.bam        # new merged Bam file
+
+#sort and index
+sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools sort -@ $COR $MBAM -o $MERGE/out_sorted.bam'
+export SBAM=$MERGE/out_sorted.bam
+squeue -u skanaan
+
+sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools index -@ $COR $SBAM'
+squeue -u skanaan
+
+
+# merging bams with 4 chimeric entities
+export samps=(AML401.dn.BM AML401.dn.34 AML401.rp.BM AML401.rp.34 AML801.rp.BM AML801.rp.34 AML801.dn.BM AML801.dn.34)
+export smpl1=AML_401_filter_CB_Donor
+export smpl2=AML_401_filter_CB_Recipient
+export smpl3=AML_801_filter_CB_Recipient
+export smpl4=AML_801_filter_CB_Donor
+#export smpl5=AML_101_filter_CB_Donor
+#export smpl6=AML_601_filter_CB_Donor
+printf '%s\n' "${samps[@]}"
+
+export BAM=(${test_dir}/${smpl1}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl2}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl3}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl4}/*/pacbio.CBfiltered.corrected.bam)
+#export BAM+=(${test_dir}/${smpl5}/*/pacbio.CBfiltered.corrected.bam)
+#export BAM+=(${test_dir}/${smpl6}/*/pacbio.CBfiltered.corrected.bam)
+export LAB=()
+for samp in "${samps[@]}"; do
+    export LAB+=("${samp}-")
+done
+printf '%s\n' "${LAB[@]}"
+printf '%s\n' "${BAM[@]}"
+ls -asl ${BAM[@]}
+
+export MERGE=${test_dir}/mergeA401_dn_rp_A801_rp_dn
+mkdir -p $MERGE
+cd $MERGE
+export bams=$(IFS=, ; echo "${BAM[*]}")
+export labels=$(IFS=, ; echo "${LAB[*]}")
+printf '%s\n' "${bams[@]}"
+printf '%s\n' "${labels[@]}"
+
+sbatch -n 1 -c 1 -p campus-new --mem-per-cpu=21000MB --wrap='~/develop/mergebams/target/release/mergebams\
+          -i $bams \
+          -l $labels \
+          -o $MERGE'
+squeue -u skanaan
+
+export MBAM=$MERGE/out_bam.bam        # new merged Bam file
+
+#sort and index
+sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools sort -@ $COR $MBAM -o $MERGE/out_sorted.bam'
+export SBAM=$MERGE/out_sorted.bam
+squeue -u skanaan
+
+sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools index -@ $COR $SBAM'
+squeue -u skanaan
+
+
+# merging bams with 5 chimeric entities
+export samps=(AML401.dn.BM AML401.dn.34 AML401.rp.BM AML401.rp.34 AML801.rp.BM AML801.rp.34 AML801.dn.BM AML801.dn.34 AML101.dn.BM AML101.dn.34)
+export smpl1=AML_401_filter_CB_Donor
+export smpl2=AML_401_filter_CB_Recipient
+export smpl3=AML_801_filter_CB_Recipient
+export smpl4=AML_801_filter_CB_Donor
+export smpl5=AML_101_filter_CB_Donor
+#export smpl6=AML_601_filter_CB_Donor
+printf '%s\n' "${samps[@]}"
+
+export BAM=(${test_dir}/${smpl1}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl2}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl3}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl4}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl5}/*/pacbio.CBfiltered.corrected.bam)
+#export BAM+=(${test_dir}/${smpl6}/*/pacbio.CBfiltered.corrected.bam)
+export LAB=()
+for samp in "${samps[@]}"; do
+    export LAB+=("${samp}-")
+done
+printf '%s\n' "${LAB[@]}"
+printf '%s\n' "${BAM[@]}"
+ls -asl ${BAM[@]}
+
+export MERGE=${test_dir}/mergeA401_dn_rp_A801_rp_dn_A101_dn
+mkdir -p $MERGE
+cd $MERGE
+export bams=$(IFS=, ; echo "${BAM[*]}")
+export labels=$(IFS=, ; echo "${LAB[*]}")
+printf '%s\n' "${bams[@]}"
+printf '%s\n' "${labels[@]}"
+
+sbatch -n 1 -c 1 -p campus-new --mem-per-cpu=21000MB --wrap='~/develop/mergebams/target/release/mergebams\
+          -i $bams \
+          -l $labels \
+          -o $MERGE'
+squeue -u skanaan
+
+export MBAM=$MERGE/out_bam.bam        # new merged Bam file
+
+#sort and index
+sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools sort -@ $COR $MBAM -o $MERGE/out_sorted.bam'
+export SBAM=$MERGE/out_sorted.bam
+squeue -u skanaan
+
+sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools index -@ $COR $SBAM'
+squeue -u skanaan
+
+
+# merging bams with 6 chimeric entities
+export samps=(AML401.dn.BM AML401.dn.34 AML401.rp.BM AML401.rp.34 AML801.rp.BM AML801.rp.34 AML801.dn.BM AML801.dn.34 AML101.dn.BM AML101.dn.34 AML601.dn.BM AML601.dn.34)
+export smpl1=AML_401_filter_CB_Donor
+export smpl2=AML_401_filter_CB_Recipient
+export smpl3=AML_801_filter_CB_Recipient
+export smpl4=AML_801_filter_CB_Donor
+export smpl5=AML_101_filter_CB_Donor
+export smpl6=AML_601_filter_CB_Donor
+printf '%s\n' "${samps[@]}"
+
+export BAM=(${test_dir}/${smpl1}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl2}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl3}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl4}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl5}/*/pacbio.CBfiltered.corrected.bam)
+export BAM+=(${test_dir}/${smpl6}/*/pacbio.CBfiltered.corrected.bam)
+export LAB=()
+for samp in "${samps[@]}"; do
+    export LAB+=("${samp}-")
+done
+printf '%s\n' "${LAB[@]}"
+printf '%s\n' "${BAM[@]}"
+ls -asl ${BAM[@]}
+
+export MERGE=${test_dir}/mergeA401_dn_rp_A801_rp_dn_A101_dn_A601_dn
+mkdir -p $MERGE
+cd $MERGE
+export bams=$(IFS=, ; echo "${BAM[*]}")
+export labels=$(IFS=, ; echo "${LAB[*]}")
+printf '%s\n' "${bams[@]}"
+printf '%s\n' "${labels[@]}"
+
+sbatch -n 1 -c 1 -p campus-new --mem-per-cpu=21000MB --wrap='~/develop/mergebams/target/release/mergebams\
+          -i $bams \
+          -l $labels \
+          -o $MERGE'
+squeue -u skanaan
+
+export MBAM=$MERGE/out_bam.bam        # new merged Bam file
+
+#sort and index
+sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools sort -@ $COR $MBAM -o $MERGE/out_sorted.bam'
+export SBAM=$MERGE/out_sorted.bam
+squeue -u skanaan
+
+sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='samtools index -@ $COR $SBAM'
+squeue -u skanaan
+
+
+### scrHLAtag ###
+ssh skanaan@rhino02
+
+cd ~/develop/scrHLAtag
+
+ml minimap2/2.24-GCCcore-11.2.0
+ml SAMtools/1.16.1-GCC-11.2.0
+
+export out_dir=/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes
+export COR=32
+
+export BAM=${out_dir}/merge*/out_sorted.bam
+ls -asl ${BAM[@]}
+printf '%s\n' "${BAM[@]}"
+
+
+## unsupervised run, against all HLa alleles
+for ibam in ${BAM[@]}; do
+    export ibam=$ibam
+    in_dir=`dirname $ibam`
+    export out_subdir=${in_dir}/unguided_hla_align_corrected
+    mkdir $out_subdir
+    cd $out_subdir
+    rm -R *
+    sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='~/develop/scrHLAtag/target/release/scrHLAtag -b $ibam -o $out_subdir -v -s'
+done
+
+squeue -u skanaan
+```
+## SECTION 4: LOAD and PROCESS scrHLAtag DATA in R
+
+```{r}
+## load HLA data
+align_corrected <- c("unguided_hla_align_corrected",      #1
+                     "guided_hla_align_corrected")        #2, change depending on how you named those folders
+sub_dir <- 1
+
+mixdirs <- c(
+  "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes/mergeA401_dn_rp_A801_rp", 
+  "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes/mergeA401_dn_rp_A801_rp_dn",
+  "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes/mergeA401_dn_rp_A801_rp_dn_A101_dn",
+  "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes/mergeA401_dn_rp_A801_rp_dn_A101_dn_A601_dn"
+)
+mixdirs<- lapply(mixdirs, dir, pattern = paste0("^", align_corrected[sub_dir]), recursive = F, full.names = T) %>% unlist
+
+# which sample do you want to see first?
+s <- 1 # 1 through 4
+
+cts <- HLA_load(directories = mixdirs[s])
+
+## Analyzing distribution of HLA alleles per Cell Barcodes in UMAP space
+HLA_umap <- HLA_clusters(reads = cts[["mRNA"]], 
+                         k = s+2, 
+                         # seu = seu,
+                         # CB_rev_com = T,  # TRUE for 3prime 10x on pacbio
+                         geno_metadata_id = "geno", 
+                         method = "consensus",
+                         return_heavy = T,
+                         seed = NULL, suppress_plots = T,
+                         spread = 5, min_dist = 0.001, repulsion_strength = 0.001)
+
+HLA_umap[[2]]+scale_color_manual(values=pals::glasbey())+theme_classic() #+ tune::coord_obs_pred()
+
+HLA_umap[[1]]$label <- stringr::str_split_fixed(rownames(HLA_umap[[1]]), "\\-", 2)[,1]
+HLA_umap[[1]]$label <- substr(HLA_umap[[1]]$label,1,nchar(HLA_umap[[1]]$label)-3)
+ggplot(HLA_umap[[1]], aes(x=umap1, y=umap2, color=as.factor(label)))+geom_point(size=0.5)+scale_color_manual(values=pals::glasbey())+theme_classic()
+table(HLA_umap[[1]]$hla_clusters, HLA_umap[[1]]$label) %>% prop.table(. , margin = 1)
+
+## Retreiving Top HLA alleles
+top_alleles <- Top_HLA_list(reads_1 = cts[["mRNA"]], reads_2 = cts[["gene"]], 
+                            suppress_plots = F, k = s+2, bulk_to_perCB_threshold = 3000)
+
+## write new 'alleles' file
+write(top_alleles, file.path(dirs_path, "inscilico_mixes", paste0(basename(dirname(mixdirs[s])), "_guided", "_top_alleles.csv")))
+
+```
+## SECTION 5: Run scrHLAtag (2nd or later iteration(s) guided by HLA top allele candidates)
+
+```{bash}
+##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
+
+## load modules
+ml minimap2/2.24-GCCcore-11.2.0
+ml SAMtools/1.16.1-GCC-11.2.0
+
+## locate BAM files
+export out_dir=/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes
+export COR=32
+
+## run one at a time each of those 4 files:
+export basedir=mergeA401_dn_rp_A801_rp
+export basedir=mergeA401_dn_rp_A801_rp_dn
+export basedir=mergeA401_dn_rp_A801_rp_dn_A101_dn
+export basedir=mergeA401_dn_rp_A801_rp_dn_A101_dn_A601_dn
+
+export BAM=${out_dir}/${basedir}/out_sorted.bam
+ls -asl ${BAM[@]}
+
+export hla=${out_dir}/alleles_file.tsv
+cat ${out_dir}/${basedir}_guided_top_alleles.csv | sed 's/,/\t/g' > $hla
+cat $hla
+wc -l < $hla
+
+for ibam in ${BAM[@]}; do
+    export ibam=$ibam
+    in_dir=`dirname $ibam`
+    export out_subdir=${in_dir}/guided_hla_align_corrected
+    mkdir $out_subdir
+    cd $out_subdir
+    rm -R *
+    export hla_list=${out_subdir}/alleles_file.tsv
+    cat ${out_dir}/${basedir}_guided_top_alleles.csv | sed 's/,/\t/g' > $hla_list
+    sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='~/develop/scrHLAtag/target/release/scrHLAtag -b $ibam -a $hla_list -o $out_subdir -v -s'
+done
+
+squeue -u skanaan
+
+
+```
+## SECTION 6: LOAD and PROCESS scrHLAtag DATA in R (from 2nd or later iteration(s) guided by HLA top allele candidates)
+
+```{r}
+## load HLA data
+align_corrected <- c("unguided_hla_align_corrected",      #1
+                     "guided_hla_align_corrected")        #2, change depending on how you named those folders
+sub_dir <- 2
+
+mixdirs <- c(
+  "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes/mergeA401_dn_rp_A801_rp", 
+  "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes/mergeA401_dn_rp_A801_rp_dn",
+  "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes/mergeA401_dn_rp_A801_rp_dn_A101_dn",
+  "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/inscilico_mixes/mergeA401_dn_rp_A801_rp_dn_A101_dn_A601_dn"
+)
+mixdirs<- lapply(mixdirs, dir, pattern = paste0("^", align_corrected[sub_dir]), recursive = F, full.names = T) %>% unlist
+
+# which sample do you want to see first?
+s <- 1 # 1 through 4
+
+cts <- HLA_load(directories = mixdirs[s])
+
+## Analyzing distribution of HLA alleles per Cell Barcodes in UMAP space
+HLA_umap <- HLA_clusters(reads = cts[["mRNA"]], 
+                         k = s+2, 
+                         # seu = seu,
+                         # CB_rev_com = T,  # TRUE for 3prime 10x on pacbio
+                         geno_metadata_id = "geno", 
+                         method = "consensus",
+                         return_heavy = T,
+                         seed = NULL, suppress_plots = T,
+                         spread = 5, min_dist = 0.001, repulsion_strength = 0.001)
+
+HLA_umap[[2]]+scale_color_manual(values=pals::glasbey())+theme_classic() #+ tune::coord_obs_pred()
+
+HLA_umap[[1]]$label <- stringr::str_split_fixed(rownames(HLA_umap[[1]]), "\\-", 2)[,1]
+HLA_umap[[1]]$label <- substr(HLA_umap[[1]]$label,1,nchar(HLA_umap[[1]]$label)-3)
+ggplot(HLA_umap[[1]], aes(x=umap1, y=umap2, color=as.factor(label)))+geom_point(size=0.5)+scale_color_manual(values=pals::glasbey())+theme_classic()
+table(HLA_umap[[1]]$hla_clusters, HLA_umap[[1]]$label) %>% prop.table(. , margin = 1)
+
+## Retreiving Top HLA alleles
+top_alleles <- Top_HLA_list(reads_1 = cts[["mRNA"]], reads_2 = cts[["gene"]], 
+                            suppress_plots = F, k = s+2, bulk_to_perCB_threshold = 3000)
+
+## write new 'alleles' file
+write(top_alleles, file.path(dirs_path, "inscilico_mixes", paste0(basename(dirname(mixdirs[s])), "_guided", "_top_alleles.csv")))
+
+### REPEAT SECTIONS 5 and 6 AS MANY TIMES AS NECESSARY TO REACH A CONVERGENCE ONTO THE PUTATIVE HLA LISTS ###
+
+```

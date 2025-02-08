@@ -1,0 +1,386 @@
+---
+title: "20240827_TN_workflow_example"
+author: "SBK"
+date: "8/27/2024"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+---
+## SECTION 1: set up virtual environment for isoseq, do this once and you're all set!
+## version 4.0.0 and above should work for Revio sequencing data; isoseq3 works for Sequel IIe data
+
+```{bash}
+##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
+
+export PATH=/home/skanaan/.conda/envs/isoseq/bin/python:$PATH
+echo $PATH
+ml fhPython/3.8.6-foss-2020b-Python-3.8.6 
+ml Anaconda3/2022.05
+ml SAMtools/1.11-GCC-10.2.0
+
+conda create -n isoseq_v4 python=3 #skip this if already created
+
+source activate isoseq_v4 
+
+conda init zsh # restart your shell for changes to take effect, then reactivate isoseq and continue configuration
+conda config --add channels defaults
+conda config --add channels bioconda
+conda config --add channels conda-forge
+conda install -c bioconda lima
+y
+conda install -c bioconda isoseq
+y
+conda update -c bioconda isoseq
+y
+conda install -c bioconda pbaa
+y
+conda install -c bioconda pbbam
+y
+conda install -c bioconda pbcore
+y
+conda install -c bioconda pbfusion
+y
+conda install -c bioconda pbmarkdup
+y
+conda install -c bioconda pbskera
+y
+conda install -c bioconda pbsv
+y
+conda install -c bioconda pbpigeon
+y
+conda install -c bioconda pbmm2
+y
+conda install -c bioconda trgt
+y
+conda install -c bioconda pysam tqdm
+y
+conda install -c "conda-forge/label/cf201901" construct
+y
+conda install -c conda-forge argparse
+y
+conda install -c conda-forge gzip
+y
+conda install -c conda-forge r-sys
+y
+conda install -c bioconda structure
+y
+conda update --all
+y
+
+conda deactivate
+## exit and restart Terminal session
+
+```
+## SECTION 2: Running IsoSeq pipline on PacBio HLA pulldown HiFi reads
+
+```{bash}
+##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
+
+#environment
+export PATH=/home/skanaan/.conda/envs/isoseq/bin/python:$PATH
+ml Anaconda3/2022.05
+ml SAMtools/1.16.1-GCC-11.2.0
+source activate isoseq_v4
+# Check lima version, >= 2.6.0
+lima --version
+# Check isoseq version, >= 4.0.0
+isoseq --version
+export ref_dir=/fh/fast/furlan_s/grp/refs/long_read_refs/pacbio
+export data_dir=/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pacbio_hifi/r64272e_20221202_210558
+export out_dir=/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pacbio_isoseq_scrHLAtag_out
+mkdir $out_dir
+cd $out_dir
+
+# 10x primer file
+export primers_5p=$ref_dir/5p_10x_primers.fasta # 3p_10x_primers for 10x 3' and 5p_10x_primers for 10x 5' 
+# 10x 737k barcode list (may need to be RC'd)
+export cbc_include=/fh/fast/furlan_s/grp/refs/long_read_refs/pacbio/737K-august-2016.txt  # 5-prime 10x  v2
+#export cbc_include=/fh/fast/furlan_s/grp/refs/long_read_refs/pacbio/3M-february-2018_rc.txt    # 3-prime 10x v3.1
+# genome to align to
+export hg38=/fh/fast/furlan_s/grp/refs/GRCh38/GRCh38.p13.genome.fa
+export threads=30
+# BAM files  MAKE SURE THEY ARE INDEXED
+export BAM=${data_dir}/*/*/*hifi_reads*.bam
+ls -asl $BAM
+
+# DONT FORGET: 5prime is 16B-10U-T and 3prime is T-12U-16B
+for ibam in $BAM; do
+    export bam=$ibam
+    in_dir=`dirname $bam`
+    prefix=$in_dir/`basename $bam | cut -d'.' -f1`
+    export prefix=${prefix/#"${data_dir}/"}
+    export out_subdir=`dirname $prefix`
+    mkdir -p $out_subdir
+    sbatch -n 1 -c $threads -M gizmo --mem-per-cpu=21000MB --wrap='lima \
+        --log-level INFO \
+        --log-file $out_subdir/lima.log \
+        --isoseq \
+        -j $threads \
+        $bam \
+        $primers_5p \
+        $prefix.bam &&
+    isoseq tag \
+        --log-level INFO \
+        --log-file $out_subdir/tag.log \
+        -j $threads \
+        --design 16B-10U-T \
+        $prefix.5p--3p.bam \
+        $prefix.tagged.bam &&
+    isoseq refine \
+        --log-level INFO \
+        --log-file $out_subdir/refine.log \
+        -j $threads \
+        --require-polya \
+        $prefix.tagged.bam \
+        $primers_5p \
+        $prefix.refined.bam &&
+    isoseq correct \
+        --log-level INFO \
+        --log-file $out_subdir/correct.log \
+        -j $threads \
+        --barcodes $cbc_include \
+        $prefix.refined.bam \
+        $prefix.corrected.bam &&
+    samtools sort \
+        -m 2G \
+        -t CB \
+        $prefix.corrected.bam \
+        -o $prefix.corrected.sorted.bam &&
+    isoseq bcstats --json $prefix.bcstats.json -o $prefix.bcstats.tsv $prefix.corrected.bam'
+done
+squeue -u skanaan
+conda deactivate
+
+```
+## SECTION 3: Run scrHLAtag (1st unsupervised iteration)
+
+```{bash}
+##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
+
+## if you haven't already, install scrHLAtag (do this once!)
+git clone https://github.com/furlan-lab/scrHLAtag.git
+git pull
+cargo build --release && cp target/release/scrHLAtag ~/.local/bin
+
+## load modules
+ml minimap2/2.24-GCCcore-11.2.0
+ml SAMtools/1.16.1-GCC-11.2.0
+
+export out_dir=/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pacbio_isoseq_scrHLAtag_out
+export BAM=${out_dir}/*/*/*corrected.bam  
+ls -asl ${BAM[@]}
+
+## unsupervised run, against all HLa alleles
+export COR=32
+for ibam in ${BAM[@]}; do
+    export ibam=$ibam
+    in_dir=`dirname $ibam`
+    export out_subdir=${in_dir}/unguided_hla_align_corrected
+    mkdir $out_subdir
+    cd $out_subdir
+    rm -R *
+    sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='~/dev/scrHLAtag/target/release/scrHLAtag -b $ibam -o $out_subdir -v -s'
+done
+squeue -u skanaan
+
+```
+## SECTION 4: SETTING UP ENVIRONMENT in R
+
+```{r}
+graphics.off()
+rm(list=ls())
+knitr::opts_chunk$set(fig.width=8, fig.height=6,dpi=300,
+                      echo=FALSE, warning=FALSE, message=FALSE)
+knitr::opts_chunk$set(dev.args=list(bg="transparent"))
+ROOT_DIR<-"/fh/fast/furlan_s/user/skanaan/scrHLAtyping"
+stem<-"/WorkFlowTest_AML401/_R_ANALYSES"
+DATA_DIR <- file.path(ROOT_DIR, stem, "data")   
+RES_DIR  <- file.path(ROOT_DIR,  stem, "res")   
+RMD_DIR  <- file.path(ROOT_DIR, stem, "rmd")     
+CDS_DIR <- file.path(ROOT_DIR, stem, "cds")
+FIG_DIR <- file.path(ROOT_DIR,  stem, "figs")
+
+# dir.create(file.path(ROOT_DIR, stem))
+# dir.create(DATA_DIR)
+# dir.create(RES_DIR)
+# dir.create(RMD_DIR)
+# dir.create(CDS_DIR)
+# dir.create(FIG_DIR)
+
+## if you haven't already:
+remotes::install_github("https://github.com/furlan-lab/scrHLAmatrix", upgrade = "never", auth_token="<until_scrHLAmatrix_becomes_public,_use_your_token_here>")
+## make sure leiden and its python dependencies are installed:
+# reticulate::install_python(version = '<version>') #example '3.8.2'
+# reticulate::py_install('python-igraph')
+# reticulate::py_install('leidenalg', forge = TRUE)
+# reticulate::py_config()
+
+suppressPackageStartupMessages({
+  library(stringr)
+  library(pbmcapply)
+  library(parallel)
+  library(Matrix)
+  library(magrittr)
+  library(htmltools)
+  library(ggplot2)
+  library(Seurat)
+  library(dplyr)
+  library(cowplot)
+  library(Biostrings)
+  library(data.table)
+  library(IRanges)
+  library(S4Vectors)
+  library(uwot)
+  library(gridExtra)
+  library(tidyr)
+  library(viridis)
+  library(crayon)
+  library(reticulate)
+  library(viewmastR)
+  library(scCustomize)
+  library(Polychrome)
+  library(ggh4x)
+  library(muscat)
+  # library(ComplexHeatmap)
+  # library(scrubletR)
+  library(scrHLAmatrix)
+})
+packageVersion("scrHLAmatrix")
+options(warn=-1) #to suppress warnings globaly. options(warn=0) to get them back
+
+## color palette
+bmcols <- viewmastR::sfc(16)[c(1:3, 5:16)]
+names(bmcolsl)<-c("01_HSC", "02_Early_Erythroid","03_Late_Erythroid","04_Myeloid_Progenitor","05_Lymphoid_Progenitor","06_pDC","07_cDC","08_CD14_Monocyte","09_CD16_Monocyte","10_Other","11_Pre_B","12_B", "13_Plasma","14_T" ,"15_NK")
+
+```
+## SECTION 5: LOAD SEURAT DATA AND scrHLAtag PROCESSED DATA in R
+
+```{r}
+## a list of pre-processed and saved Seurat objects, in our example just one:
+rds <- c(
+  "220926_seuratObj_TN1_celltype_genotype.RDS"
+  )          
+names(rds) <- c("AML_401")
+samp <- 1
+seu<-readRDS(file.path(CDS_DIR, rds[samp]))
+samples<-unique(sapply(colnames(seu), function(i){
+  i<-strsplit(i, "_")
+  paste(i[[1]][1:length(i[[1]])-1], collapse = "_")  
+}))
+
+## Match the patient names with their respective count data directories
+dirs_path <- "/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pacbio_isoseq_scrHLAtag_out"
+dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
+dirs<- lapply(dirs, list.dirs, recursive = F) %>% unlist
+# pattern example: "^unguid" or "^guid" depending on how files were named and which scrHLAtag iteration is running
+dirs<- lapply(dirs, dir, pattern = "^unguid", recursive = F, full.names = T) %>% unlist
+dirnames <- c("TN_BM", "TN_34") # this is how the samples were organized in the directories
+
+## Load the counts files
+cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
+
+## Retrieving Top HLA alleles
+top_alleles <- Top_HLA_list(reads_1 = cts[["mRNA"]], reads_2 = cts[["gene"]], seu = seu, suppress_plots = F)
+
+## write new 'alleles' file
+write(top_alleles, file.path(dirs_path, paste0(substr(samples[1],1,nchar(samples[1])-3), "_guided", "_top_alleles.csv")))
+
+## That's it!.. time for another scrHLAtag iteration.
+```
+## SECTION 6: Run scrHLAtag (2nd or later iteration(s) guided by HLA top allele candidates)
+
+```{bash}
+##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
+
+## load modules
+ml minimap2/2.24-GCCcore-11.2.0
+ml SAMtools/1.16.1-GCC-11.2.0
+
+export out_dir=/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pacbio_isoseq_scrHLAtag_out
+export COR=32
+export samp=TN  # change everytime there's a new sample
+export hla=${out_dir}/alleles_file.tsv
+cat ${out_dir}/${samp}_guided_top_alleles.csv | sed 's/,/\t/g' > $hla
+cat $hla
+wc -l < $hla
+export BAM=${out_dir}/*/*/*corrected.bam  
+ls -asl ${BAM[@]}
+
+for ibam in ${BAM[@]}; do
+    export ibam=$ibam
+    in_dir=`dirname $ibam`
+    export out_subdir=${in_dir}/guided_hla_align_corrected
+    mkdir $out_subdir
+    cd $out_subdir
+    rm -R *
+    export hla_list=${out_subdir}/alleles_file.tsv
+    cat ${out_dir}/${samp}_guided_top_alleles.csv | sed 's/,/\t/g' > $hla_list
+    sbatch -n 1 -c $COR -p campus-new --mem-per-cpu=21000MB --wrap='~/develop/scrHLAtag/target/release/scrHLAtag -b $ibam -a $hla_list -o $out_subdir -v -s'
+done
+
+squeue -u skanaan
+
+## Repeat SECTION 5, then SECTION 6 again for a total of ~4~5 iterations, until the `Top_HLA_list()` function tells you it was the final iteration 
+```
+## SECTION 7: Creating the HLA matrix in the Seurat embedding 
+
+```{r}
+## a list of pre-processed and saved Seurat objects, in our example just one:
+rds <- c(
+  "220926_seuratObj_TN1_celltype_genotype.RDS"
+  )          
+names(rds) <- c("AML_401")
+samp <- 1
+seu<-readRDS(file.path(CDS_DIR, rds[samp]))
+samples<-unique(sapply(colnames(seu), function(i){
+  i<-strsplit(i, "_")
+  paste(i[[1]][1:length(i[[1]])-1], collapse = "_")  
+}))
+
+## Match the patient names with their respective count data directories
+dirs_path <- "/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pacbio_isoseq_scrHLAtag_out"
+dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
+dirs<- lapply(dirs, list.dirs, recursive = F) %>% unlist
+dirs<- lapply(dirs, dir, pattern = "^guid", recursive = F, full.names = T) %>% unlist
+dirnames <- c("TN_BM", "TN_34") # this is how the samples were organized in the directories
+
+## Load the counts files
+cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
+
+## define the recipient-specific and donor-specific HLA alleles if known. For example:
+rp = c("A*24:02:01", "B*48:01:01", "C*08:06", "DMA*01:02:01", "DPA1*01:03:01", "DPB1*04:02:01", "DQA1*03:03:01", "DQB1*03:01:01", "DRA*01:01:01", "DRB1*04:01:01", "DRB4*01:03:02", "E*01:03:02", "F*01:01:01")
+dn = c("A*33:03:01", "B*42:01:01", "C*17:01:01", "DPA1*03:01:01", "DPB1*105:01:01", "E*01:01:01", "F*01:01:02", "Y*02:01")
+
+## Run HLA_matrix
+hla <- HLA_Matrix(reads = cts[["mRNA"]], seu = seu, 
+                  CB_rev_com = F,    # TRUE for 3prime 10x on pacbio
+                  hla_recip = rp,
+                  hla_donor = dn,
+                  # remove_alleles = c("MICA*008:01:01", "DOB*01:01:03", "G*01:01:01", "DPB2*01:01:02"),
+                  return_stats = F,
+                  parallelize = F)
+seu[["HLA"]] <- hla
+
+## HLA expression visuals
+DefaultAssay(seu) <- "HLA"
+seu <- NormalizeData(seu, normalization.method = "LogNormalize", scale.factor = 100)
+
+j <- 10 # plot title size
+thm <- theme(legend.position = "none", axis.line = element_blank(), axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank(), plot.title = element_text(size = j))
+
+FeaturePlot_scCustom(seu, 
+                     split.by = "geno", 
+                     row.names(seu)[3], pt.size = 0.1)#+thm
+FeatP <- c()
+for (i in 1:length(row.names(seu))) {
+  g <- FeaturePlot_scCustom(seu, row.names(seu)[i], pt.size = 0.1)+thm
+  FeatP<- c(FeatP,list(g))
+}
+do.call("plot_grid", c(FeatP, align = "hv", ncol=floor(sqrt(length(FeatP))))) # recommended layout 12 x 15 in
+
+# save the RDS object
+saveRDS(seu, file.path(CDS_DIR, rds[samp]))
+
+```

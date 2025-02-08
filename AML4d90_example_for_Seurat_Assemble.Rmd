@@ -1,0 +1,236 @@
+---
+title: "TN1"
+author: "Furlan_Lab"
+date: '2022-08-16'
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r, warning=FALSE, message=FALSE, warning=FALSE, echo=F}
+graphics.off()
+rm(list=ls())
+knitr::opts_chunk$set(fig.width=8, fig.height=6,dpi=300,
+                      echo=FALSE, warning=FALSE, message=FALSE)
+knitr::opts_chunk$set(dev.args=list(bg="transparent"))
+ROOT_DIR<-"~/Fred Hutchinson Cancer Research Center"
+stem<-"Furlan_Lab - General/experiments/patient_marrows/TN1"
+DATA_DIR <- file.path(ROOT_DIR,  stem, "data")      # SPECIFY HERE
+RES_DIR  <- file.path(ROOT_DIR, stem, "res")     # SPECIFY HERE
+RMD_DIR  <- file.path(ROOT_DIR, stem, "rmd")     # SPECIFY HERE
+CDS_DIR <- file.path(ROOT_DIR,  stem, "cds")
+FIG_DIR <- file.path(ROOT_DIR,  stem, "figs")
+
+suppressPackageStartupMessages({
+  library(monocle3)
+  library(viewmastR)
+  #library(reticulate)
+  library(openxlsx)  
+  library(dplyr)
+  library(Matrix)
+  library(ggplot2)
+  #library(rhdf5)
+  library(xfun)
+  library(pals)
+  library(RColorBrewer)
+  #library(knitr)
+  library(Seurat)
+  #library(Signac)
+  #library(EnsDb.Hsapiens.v86)
+  library(dplyr)
+  library(scCustomize)
+})
+
+#devtools::install_github("timoast/signac", ref = "develop")
+#py_config()
+xfun::pkg_load2(c('base64enc', 'htmltools', 'mime'))
+
+#load_all(file.path(ROOT_DIR, "fstree"))
+# Set global ggplot2 properties for making print-scaled PDF panels
+SFtheme<-theme_bw(base_size=14) + 
+  theme(panel.background = element_rect(fill = "transparent",colour = NA), # or theme_blank()
+    panel.grid.minor = element_blank(), 
+    panel.grid.major = element_blank(),
+    legend.background = element_rect(fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent"), 
+    legend.key = element_rect(fill = "transparent", colour = NA),
+    plot.background = element_rect(fill = "transparent",colour = NA))
+theme_set(SFtheme)
+
+exp_colors<-c("grey85", "orange", "red", "violetred4", "black")
+
+
+lots_color<-function(n){
+  if(n<434){
+  color = grDevices::colors()[grep('gr(a|e)y', grDevices::colors(), invert = T)]
+  sample(color, n)
+  }else{
+    stop("max 433 colors")
+  }
+}
+
+pal <- viridis::viridis(n = 10, option = "D")
+pal2 <- viridis::viridis(n = 10, option = "C")
+mcols=c(sfc(16)[c(1:3, 5:16)], "grey70")
+bmcols=sfc(16)[c(1:3, 5:16)]
+```
+
+##  seurat 5p (use as template for other MRD 5p)
+```{r}
+dirs<-list.files(DATA_DIR)
+dirs<-dirs[grep("^TN", dirs)]
+
+fileroot<-file.path(DATA_DIR, "SAMPLE/outs/per_sample_outs/SAMPLE/count/sample_feature_bc_matrix.h5")
+files<-sapply(dirs, function(dir) gsub("SAMPLE", dir, fileroot))
+seus<-lapply(files, function(i) Read10X_h5(i))
+
+#install.packages("Matrix")
+gc()
+
+seuG <- lapply(seus, function(i) CreateSeuratObject(counts = i$`Gene Expression`))
+seuP <- lapply(seus, function(i) CreateSeuratObject(counts = i$`Antibody Capture`))
+
+
+seuP <- merge(
+  x = seuP[[1]],
+  y = seuP[2:length(seuP)], add.cell.ids = dirs
+)
+
+
+seu <- merge(
+  x = seuG[[1]],
+  y = seuG[2:length(seuG)], add.cell.ids = dirs
+)
+
+seu[["ADT"]]<-seuP@assays$RNA
+
+
+seu$tissue<-rownames(seu@meta.data) %>% strsplit("_") %>% sapply("[[", 3)
+seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^MT-")
+seu$logUMI<-log10(seu$nCount_RNA)
+VlnPlot(seu, features = c("nFeature_RNA", "nCount_RNA", "logUMI", "percent.mt"), ncol = 4, pt.size = 0)
+
+lthresh<-1000
+hthresh<-50000
+
+seu<-seu[,seu$nCount_RNA>lthresh]
+seu<-seu[,seu$nCount_RNA<hthresh]
+
+seu<-seu[,seu$percent.mt<20]
+```
+
+## Add genotyping
+```{r}
+ctsv<-read.table(file.path(DATA_DIR, "merge/souporcell_2", "clusters.tsv"), header = T)
+rownames(ctsv)<-ctsv$barcode
+ctsv<-ctsv[Cells(seu),]
+cs<-as.matrix(ctsv[,colnames(ctsv)[grep("^cluster", colnames(ctsv))]])
+pc<-princomp(log(cs*-1))
+pcv<-as.data.frame(pc$scores)
+pcv$status<-ctsv$status
+pcv$assignment<-ctsv$assignment
+#rownames(seu@meta.data)
+pcv$barcode<-ctsv$barcode
+ggplot(ctsv, aes(x=cluster0, y=cluster1, color=assignment))+geom_point(size=0.2)+scale_color_manual(values=pals::glasbey())
+ggplot(ctsv, aes(x=log10(-cluster0), y=log10(-cluster1), color=assignment))+geom_point(size=0.2)+scale_color_manual(values=pals::glasbey())
+ggplot(pcv, aes(x=Comp.1, y=Comp.2, color=assignment))+geom_point(size=0.2)+scale_color_manual(values=pals::glasbey())
+seu$geno<-"Not_Calculated"
+seu@meta.data[pcv$barcode,]$geno<-pcv$assignment
+seu@meta.data<-seu@meta.data[Cells(seu),]
+
+```
+
+# Omit potential doublets
+```{r}
+seu<-seu[,seu$geno %in% c("0", "1")]
+table(seu$geno)
+```
+
+## Annotate by CD34 enrich or not
+```{r}
+seu$dataset<-colnames(seu)
+seu$dataset[grepl("^TN_34", colnames(seu))]<-"34_enrich"
+seu$dataset[grepl("^TN_BM", colnames(seu))]<-"BM"
+table(seu$dataset)
+```
+
+## Cluster & annotate
+```{r}
+seu <- NormalizeData(seu, normalization.method = "LogNormalize", scale.factor = 10000)
+seu <- FindVariableFeatures(seu, selection.method = "vst", nfeatures = 10000)
+seu <- ScaleData(seu)
+seu <- RunPCA(seu, features = VariableFeatures(object = seu), npcs = 50)
+ElbowPlot(seu, 50)
+seu <- FindNeighbors(seu, dims = 1:40)
+seu <- FindClusters(seu, resolution = 0.5)
+seu <- RunUMAP(seu, dims = 1:40)
+
+DimPlot_scCustom(seu)
+
+#viewmaster
+ref <- readRDS(file.path("/fh/fast/furlan_s/grp/data/ddata/BM_data/healthy_bone_marrow_greenleaf.rds")) 
+ref <- monocle3_to_seurat(ref)
+ref <- calculate_gene_dispersion(ref)
+ref <- select_genes(ref, top_n = 5000, logmean_ul = -1, logmean_ll = -8)
+plot_gene_dispersion(ref)
+
+DefaultAssay(seu)<-"RNA"
+seu <- calculate_gene_dispersion(seu)
+seu <- select_genes(seu, top_n = 5000, logmean_ul = -1, logmean_ll = -8)
+plot_gene_dispersion(seu)
+
+vg <- intersect(get_selected_genes(seu), get_selected_genes(ref))
+seu<-viewmastR::viewmastR(seu, ref, ref_celldata_col = "BioClassification", selected_genes = vg)
+df<-data.frame(old=levels(factor(ref$BioClassification)), new=c("01_HSC", "02_Early_Erythroid", "03_Late_Erythroid", "04_Myeloid_Progenitor", "04_Myeloid_Progenitor", "05_Lymphoid_Progenitor", "04_Myeloid_Progenitor", "04_Myeloid_Progenitor", "06_pDC", "07_cDC", "08_CD14_Monocyte", "08_CD14_Monocyte", "09_CD16_Monocyte", "10_Other", "05_Lymphoid_Progenitor", "11_Pre_B", "12_B", "13_Plasma", "14_T", "14_T","14_T","14_T","14_T","14_T","15_NK", "10_Other"))
+View(df) #to see if all makes sense
+seu$celltype<-factor(seu$viewmastR_pred)
+levels(seu$celltype)<-df$new[match(levels(seu$celltype), df$old)]
+seu$celltype<-factor(as.character(seu$celltype))
+rm(df)
+
+# normalize Cite-seq data
+DefaultAssay(seu) <- "ADT"
+seu <- NormalizeData(seu, normalization.method = "CLR", margin = 2)
+DefaultAssay(seu) <- "RNA"
+
+DimPlot_scCustom(seu, colors_use = mcols, label = F)
+
+```
+
+## Assign recipient vs donor by genotype
+```{r}
+seu$geno[seu$geno=="0"]<-"Recipient"
+seu$geno[seu$geno=="1"]<-"Donor"
+DimPlot(seu, group.by = "geno", order = c("Donor", "Recipient"))+scale_color_manual(values=c("red", "gray80"))
+
+```
+
+## OPTIONAL: backup UMAP coordinates and any other assay elements in case the Seurat RDS is lost and you want to recreate the UMAPs from metadata files
+```{r}
+
+seu@meta.data$UMAP_1_backup <- seu@reductions[["umap"]]@cell.embeddings[, 1]
+seu@meta.data$UMAP_2_backup <- seu@reductions[["umap"]]@cell.embeddings[, 2]
+
+#backup the ADT counts for HLA-A, -E, and DRA used in the study. They will need to be convertaed back to an 'Assay' and CLR normalized
+seu@meta.data$HLA_A_adtbackup <- (seu[["ADT"]]@counts["HLA-A.1", , drop = F] %>% as.data.frame() %>% t())[, 1]
+seu@meta.data$HLA_DRA_adtbackup <- (seu[["ADT"]]@counts["HLA-DRA.1", , drop = F] %>% as.data.frame() %>% t())[, 1]
+seu@meta.data$HLA_E_adtbackup <- (seu[["ADT"]]@counts["HLA-E.1", , drop = F] %>% as.data.frame() %>% t())[, 1]
+
+```
+
+## Save RDS then load for downstream analysis
+```{r}
+saveRDS(seu, file.path(CDS_DIR, "220926_seuratObj_TN1_celltype_genotype.RDS"))
+seu <- readRDS(file = file.path(CDS_DIR, "220926_seuratObj_TN1_celltype_genotype.RDS"))
+
+```
+
+### Appendix
+```{r Appendix,echo=FALSE}
+sessionInfo()
+getwd()
+```
