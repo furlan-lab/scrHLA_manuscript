@@ -90,9 +90,9 @@ dirnames <- c("AML_F_5", "AML_E_5", "AML401_BM", "AML401_34")               # th
 ## Load Seurat
 ## Note: you can reconstruct any Seurat object from the barcodes.tsv, metadata.csv, features.tsv, and matrix.mtx files available in GEO
 seu<-readRDS(file.path("/fh/fast/furlan_s/user/skanaan/scrHLAtyping/_R_ANALYSES/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/cds",
-                       "221010_DB1_addmutations.RDS")) # 5' rds
+                       "221010_AML101_addmutations.RDS")) # 5' rds
 # seu<-readRDS(file.path("/fh/fast/furlan_s/user/skanaan/scrHLAtyping/_R_ANALYSES/231020_longreadTSO_HLA_MDS_DB_LA_MO_EWS/cds",
-#                        "220919_seuratObj_DB1_celltype_genotype.RDS")) # 3' rds
+#                        "220919_seuratObj_AML101_celltype_genotype.RDS")) # 3' rds
 
 ## Load the counts files
 cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
@@ -225,7 +225,7 @@ ggplot(pr_expgg, aes(x= as.factor(souporcell_geno), y= Proportions, fill = as.fa
 ## a list of pre-processed and saved Seurat objects, in our example just one:
 ## AML4 day 90 post-tx
 rds <- c(
-  "220926_seuratObj_TN1_celltype_genotype.RDS"
+  "220926_seuratObj_AML401_celltype_genotype.RDS.RDS"
   )          
 names(rds) <- c("AML_401")
 samp <- 1
@@ -284,8 +284,8 @@ DimPlot_scCustom(seu, group.by = "geno", label = F, pt.size = 0.1,order = sort(u
 
 #------ Fig.2b ------#
 ## load pre-aggregated data, previously collected using 'HLA_Matrix()' with arg 'return_stats = TRUE'
-perstep_stats <- data.table::fread(file.path(DATA_DIR, paste0("TN_per_step_stats-iter4.csv")), header = T, sep=",")
-umi_dupl <- data.table::fread(file.path(DATA_DIR, paste0("TN_umi_dupl-iter4.csv")), header = T, sep=",")
+perstep_stats <- data.table::fread(file.path(DATA_DIR, paste0("AML4_per_step_stats-iter4.csv")), header = T, sep=",")
+umi_dupl <- data.table::fread(file.path(DATA_DIR, paste0("AML4_umi_dupl-iter4.csv")), header = T, sep=",")
 
 ## rename some of the cols to look nice in the plot
 perstep_stats <- mutate(perstep_stats, step = case_when(
@@ -1074,7 +1074,7 @@ cts.fa$gene0 <- gsub(special, "-", cts.fa$gene)
 cts.fa$header <- paste0("> ", cts.fa$cbumi, " mapping to ", cts.fa$gene0)
 cts.fa$sequence <- paste0(cts.fa$seq)
 cts.fa <- cts.fa[, c("header", "sequence")]
-fasta <- "HLA_of_TN1.fa"          #change every time
+fasta <- "HLA_of_AML401.fa"          #change every time
 write.table(cts.fa, file.path(DATA_DIR, fasta), quote=FALSE, sep='\n', col.names = F, row.names = F)
 
 # align the fasta file and a few examples of identical CB:UMI with deferent sequences and called differently by mm2!
@@ -1130,8 +1130,8 @@ ggplot(mol_swap, aes(y= swap_type, x= frequency, fill= `10x Chemistry`))+
 
 ```{r}
 ## load pre-aggregated data, previously collected using 'HLA_Matrix()' with arg 'return_stats = TRUE'
-perstep_stats <- data.table::fread(file.path(DATA_DIR, paste0("DB_per_step_stats-iter4.csv")), header = T, sep=",")
-umi_dupl <- data.table::fread(file.path(DATA_DIR, paste0("DB_umi_dupl-iter4.csv")), header = T, sep=",")
+perstep_stats <- data.table::fread(file.path(DATA_DIR, paste0("AML1_per_step_stats-iter4.csv")), header = T, sep=",")
+umi_dupl <- data.table::fread(file.path(DATA_DIR, paste0("AML1_umi_dupl-iter4.csv")), header = T, sep=",")
 
 perstep_stats <- mutate(perstep_stats, step = case_when(
   step == "0_raw_reads" ~ "0_Starting counts",
@@ -1291,8 +1291,8 @@ layout <- "
 ABC#DFG
 "
 # plot <- p1 + p3 + p5 + p2 + p4 + p6 + patchwork::plot_layout(design = layout)
-# saveRDS(plot, file.path(DATA_DIR, "celltype_composition_TN123.RDS"))
-plot <- readRDS(file.path(DATA_DIR, "celltype_composition_TN123.RDS"))
+# saveRDS(plot, file.path(DATA_DIR, "celltype_composition_AML40123.RDS"))
+plot <- readRDS(file.path(DATA_DIR, "celltype_composition_AML40123.RDS"))
 DimPlot(seu, group.by = "celltype", cols = bmcolsl, split.by = "geno") /plot # 5x7 in then scale down to 75%
 
 #------ Suppl.Fig.S10c ------#
@@ -1370,7 +1370,7 @@ ggplot(rp.dn.predval, aes(x= MMlevel, y= rp.dn.pred.val)) +
 
 ```{r}
 
-fasta <- "HLA_of_TN1.fa"          #change every time
+fasta <- "HLA_of_AML401.fa"          #change every time
 align <- readDNAStringSet(file.path(DATA_DIR, fasta))
 ref_align <- readDNAStringSet(file.path("~/develop/scrHLAtag/data/HLA_DB_3field_mRNA.fa.gz")) # mRNA alignment
 

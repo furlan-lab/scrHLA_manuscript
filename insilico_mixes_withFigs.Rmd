@@ -74,12 +74,12 @@ names(bmcolsl)<-c("01_HSC", "02_Early_Erythroid","03_Late_Erythroid","04_Myeloid
 
 ```{r}
 ## a list of pre-processed and saved Seurat objects:
-rds <- c("221010_DB1_addmutations.RDS",                 #1
-         "220926_seuratObj_TN1_celltype_genotype.RDS",  #2
-         "220526_seuratObj_TN2.RDS",                    #3
-         "230309_TN3_SeuObj_Genotype.RDS",              #4
-         "220816_seuratObj_NB1.RDS",                    #5
-         "221010_WC1_subset_infercnv.RDS",              #6
+rds <- c("221010_AML101_addmutations.RDS",                 #1
+         "220926_seuratObj_AML401_celltype_genotype.RDS",  #2
+         "220526_seuratObj_AML402.RDS",                    #3
+         "230309_AML403_SeuObj_Genotype.RDS",              #4
+         "220816_seuratObj_AML601.RDS",                    #5
+         "221010_amL801_subset_infercnv.RDS",              #6
          "240223_CHLA1_Seu_celltype_geno.RDS"           #7
          )          
 names(rds) <- c("AML_101", "AML_401", "AML_402", "AML_403", "AML_601", "AML_801", "AML_1501")

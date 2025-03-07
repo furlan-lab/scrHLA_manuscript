@@ -260,7 +260,7 @@ names(bmcolsl)<-c("01_HSC", "02_Early_Erythroid","03_Late_Erythroid","04_Myeloid
 ```{r}
 ## a list of pre-processed and saved Seurat objects, in our example just one:
 rds <- c(
-  "220926_seuratObj_TN1_celltype_genotype.RDS"
+  "220926_seuratObj_AML401_celltype_genotype.RDS"
   )          
 names(rds) <- c("AML_401")
 samp <- 1
@@ -329,7 +329,7 @@ squeue -u skanaan
 ```{r}
 ## a list of pre-processed and saved Seurat objects, in our example just one:
 rds <- c(
-  "220926_seuratObj_TN1_celltype_genotype.RDS"
+  "220926_seuratObj_AML401_celltype_genotype.RDS"
   )          
 names(rds) <- c("AML_401")
 samp <- 1
