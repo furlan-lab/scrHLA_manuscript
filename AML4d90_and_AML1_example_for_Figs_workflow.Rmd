@@ -84,7 +84,7 @@ dirs_path <- "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB_
 # dirs_path <- "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/231020_longreadTSO_HLA_MDS_DB_LA_MO_EWS/3_C01"      # 3' files
 dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
 dirs<- lapply(dirs, dir, pattern = "^unguid", recursive = F, full.names = T) %>% unlist
-dirnames <- c("AML_F_5", "AML_E_5", "TN_BM", "TN_34")               # this is how the 5' samples were organized in the directories
+dirnames <- c("AML_F_5", "AML_E_5", "AML401_BM", "AML401_34")               # this is how the 5' samples were organized in the directories
 # dirnames <- c("Pre_Ifng_4", "Post_Ifng_4", "AML_E_3", "MO1_IP_1") # this is how the 3' samples were organized in the directories
 
 ## Load Seurat
@@ -111,7 +111,7 @@ dirs_path <- "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB_
 # dirs_path <- "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/231020_longreadTSO_HLA_MDS_DB_LA_MO_EWS/3_C01" # 3' files
 dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
 dirs<- lapply(dirs, dir, pattern = "^guided3", recursive = F, full.names = T) %>% unlist
-dirnames <- c("AML_F_5", "AML_E_5", "TN_BM", "TN_34") # this is how the 5' samples were organized in the directories
+dirnames <- c("AML_F_5", "AML_E_5", "AML401_BM", "AML401_34") # this is how the 5' samples were organized in the directories
 # dirnames <- c("Pre_Ifng_4", "Post_Ifng_4", "AML_E_3", "MO1_IP_1") # this is how the 3' samples were organized in the directories
 
 ## Load the counts files
@@ -240,7 +240,7 @@ dirs_path <- "/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pa
 dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
 dirs<- lapply(dirs, list.dirs, recursive = F) %>% unlist
 dirs<- lapply(dirs, dir, pattern = "^guid", recursive = F, full.names = T) %>% unlist
-dirnames <- c("TN_BM", "TN_34") # this is how the samples were organized in the directories
+dirnames <- c("AML401_BM", "AML401_34") # this is how the samples were organized in the directories
 
 ## Load the counts files
 cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
@@ -1100,7 +1100,7 @@ examples <- c("CACAGTAGTACGCACC:TCGACAAGCA", #1
               "AGGCCACTCTACGAGT:CACGCTCTAC",
               "CGGCTAGTCTTAACCT:CACACTGCTT",
               "TCTTCGGTCGGAATCT:ACCTTGCGGT") 
-# example of clear molecular swap between HLA-A and HLA-B in TN1
+# example of clear molecular swap between HLA-A and HLA-B in AML4_90d
 ra1 <- ref_align[ref_align@ranges@NAMES %like% gn[3]] 
 ra2 <- ref_align[ref_align@ranges@NAMES %like% gn[4]]
 BrowseSeqs(AlignSeqs(c(ra1, align[align@ranges@NAMES %like% examples[5]], ra2), verbose = F), highlight=0, colWidth = 200, colorPatterns = F)
@@ -1272,10 +1272,10 @@ DimPlot_scCustom(seu, group.by = "geno", label = F, pt.size = 0.1,order = sort(u
 DimPlot_scCustom(seu, group.by = "celltype", colors_use = bmcolsl, split.by = "geno", pt.size = 0.4)
 
 #------ Suppl.Fig.S10b ------#
-## construct plots p1, p2, p3, p4, p5, and p6 with all 3 time-point captures of TN (days 90, 140, 163) 
+## construct plots p1, p2, p3, p4, p5, and p6 with all 3 time-point captures of AML4 (days 90, 140, 163) 
 ## and for each souporcell genotype
 
-soup <- 1 # soup 1 and 2 for each TN timepoints, loaded separately into a new 'seu' object
+soup <- 1 # soup 1 and 2 for each AML4 timepoints, loaded separately into a new 'seu' object
 seu_sub <- seu[ , rownames(seu@meta.data)[seu@meta.data$geno == sort(unique(seu@meta.data$geno))[soup]]]
 tab <- data.frame(table(seu$celltype, seu$geno))
 p1 <- ggplot(subset(tab, Var2 == sort(unique(seu@meta.data$geno))[soup]), aes(x="", y=Freq, fill=Var1))+

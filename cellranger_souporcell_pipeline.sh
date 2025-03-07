@@ -12,7 +12,7 @@ squeue -u skanaan
 #change these variables depending on the run
 export fq=/home/sfurlan/scratch/demux/220223_VH00738_19_AAAKMLLHV/AAAKMLLHV/outs/fastq_path/AAAKMLLHV
 export id=TN1                                                                                              #CHANGE EVERY TIME
-samps=(TN_BM TN_34)                                                                                 #CHANGE EVERY TIME
+samps=(AML401_BM AML401_34)                                                                                 #CHANGE EVERY TIME
 #ls -alh $fq #optionally check fastq folder
 
 

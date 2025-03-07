@@ -1,5 +1,5 @@
 ---
-title: "20240827_TN_workflow_example"
+title: "20240827_AML4_workflow_example"
 author: "SBK"
 date: "8/27/2024"
 output: html_document
@@ -276,7 +276,7 @@ dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
 dirs<- lapply(dirs, list.dirs, recursive = F) %>% unlist
 # pattern example: "^unguid" or "^guid" depending on how files were named and which scrHLAtag iteration is running
 dirs<- lapply(dirs, dir, pattern = "^unguid", recursive = F, full.names = T) %>% unlist
-dirnames <- c("TN_BM", "TN_34") # this is how the samples were organized in the directories
+dirnames <- c("AML401_BM", "AML401_34") # this is how the samples were organized in the directories
 
 ## Load the counts files
 cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
@@ -300,7 +300,7 @@ ml SAMtools/1.16.1-GCC-11.2.0
 
 export out_dir=/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pacbio_isoseq_scrHLAtag_out
 export COR=32
-export samp=TN  # change everytime there's a new sample
+export samp=AML401  # change everytime there's a new sample
 export hla=${out_dir}/alleles_file.tsv
 cat ${out_dir}/${samp}_guided_top_alleles.csv | sed 's/,/\t/g' > $hla
 cat $hla
@@ -344,7 +344,7 @@ dirs_path <- "/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pa
 dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
 dirs<- lapply(dirs, list.dirs, recursive = F) %>% unlist
 dirs<- lapply(dirs, dir, pattern = "^guid", recursive = F, full.names = T) %>% unlist
-dirnames <- c("TN_BM", "TN_34") # this is how the samples were organized in the directories
+dirnames <- c("AML401_BM", "AML401_34") # this is how the samples were organized in the directories
 
 ## Load the counts files
 cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)

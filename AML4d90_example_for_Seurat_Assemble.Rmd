@@ -1,5 +1,5 @@
 ---
-title: "TN1"
+title: "AML401"
 author: "Furlan_Lab"
 date: '2022-08-16'
 output:
@@ -153,8 +153,8 @@ table(seu$geno)
 ## Annotate by CD34 enrich or not
 ```{r}
 seu$dataset<-colnames(seu)
-seu$dataset[grepl("^TN_34", colnames(seu))]<-"34_enrich"
-seu$dataset[grepl("^TN_BM", colnames(seu))]<-"BM"
+seu$dataset[grepl("^AML401_34", colnames(seu))]<-"34_enrich"
+seu$dataset[grepl("^AML401_BM", colnames(seu))]<-"BM"
 table(seu$dataset)
 ```
 
