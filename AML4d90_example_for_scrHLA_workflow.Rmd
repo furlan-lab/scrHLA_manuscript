@@ -11,7 +11,7 @@ editor_options:
 ## SECTION 1: set up virtual environment for isoseq, do this once and you're all set!
 ## version 4.0.0 and above should work for Revio sequencing data; isoseq3 works for Sequel IIe data
 
-```{bash}
+```bash
 ##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
 
 export PATH=/home/skanaan/.conda/envs/isoseq/bin/python:$PATH
@@ -75,7 +75,7 @@ conda deactivate
 ```
 ## SECTION 2: Running IsoSeq pipline on PacBio HLA pulldown HiFi reads
 
-```{bash}
+```bash
 ##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
 
 #environment
@@ -156,7 +156,7 @@ conda deactivate
 ```
 ## SECTION 3: Run scrHLAtag (1st unsupervised iteration)
 
-```{bash}
+```bash
 ##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
 
 ## if you haven't already, install scrHLAtag (do this once!)
@@ -188,7 +188,7 @@ squeue -u skanaan
 ```
 ## SECTION 4: SETTING UP ENVIRONMENT in R
 
-```{r}
+```r
 graphics.off()
 rm(list=ls())
 knitr::opts_chunk$set(fig.width=8, fig.height=6,dpi=300,
@@ -251,19 +251,28 @@ packageVersion("scrHLAmatrix")
 options(warn=-1) #to suppress warnings globaly. options(warn=0) to get them back
 
 ## color palette
-bmcols <- viewmastR::sfc(16)[c(1:3, 5:16)]
+bmcolsl <- viewmastR::sfc(16)[c(1:3, 5:16)]
 names(bmcolsl)<-c("01_HSC", "02_Early_Erythroid","03_Late_Erythroid","04_Myeloid_Progenitor","05_Lymphoid_Progenitor","06_pDC","07_cDC","08_CD14_Monocyte","09_CD16_Monocyte","10_Other","11_Pre_B","12_B", "13_Plasma","14_T" ,"15_NK")
 
 ```
 ## SECTION 5: LOAD SEURAT DATA AND scrHLAtag PROCESSED DATA in R
 
-```{r}
-## a list of pre-processed and saved Seurat objects, in our example just one:
-rds <- c(
-  "220926_seuratObj_AML401_celltype_genotype.RDS"
-  )          
-names(rds) <- c("AML_401")
-samp <- 1
+```r
+## You can reconstruct any Seurat object from the barcodes.tsv, metadata.csv, features.tsv, and matrix.mtx files available in GEO
+expr_matrix <- readMM(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_matrix.mtx.gz"))
+rownames(expr_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_features.tsv.gz"), header=F)$V1
+colnames(expr_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_barcodes.tsv.gz"), header=F)$V1
+metadata <- data.frame(fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_metadata.csv"), header=T), row.names=1)
+seu <- CreateSeuratObject(counts = expr_matrix, project = "AML4_d90")
+#make sure the metadata barcodes are the same as the seu barcodes
+identical(metadata, metadata[colnames(seu), , drop = F])
+seu <- AddMetaData(seu, metadata)
+#if UMAP backed up in metadata, use them:
+umap_df <- data.frame(seu$UMAP_1_backup, seu$UMAP_2_backup)
+colnames(umap_df) <- c(1,2)
+seu@reductions$umap <- CreateDimReducObject(embeddings = as.matrix(umap_df), key = "umap_")
+rm(expr_matrix, metadata, umap_df)
+
 seu<-readRDS(file.path(CDS_DIR, rds[samp]))
 samples<-unique(sapply(colnames(seu), function(i){
   i<-strsplit(i, "_")
@@ -279,10 +288,10 @@ dirs<- lapply(dirs, dir, pattern = "^unguid", recursive = F, full.names = T) %>%
 dirnames <- c("AML401_BM", "AML401_34") # this is how the samples were organized in the directories
 
 ## Load the counts files
-cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
+cts <- HLA_load(directories = dirs, dir_names = dirnames, cell_data_obj = seu)
 
 ## Retrieving Top HLA alleles
-top_alleles <- Top_HLA_list(reads_1 = cts[["mRNA"]], reads_2 = cts[["gene"]], seu = seu, suppress_plots = F)
+top_alleles <- Top_HLA_list(reads_1 = cts[["mRNA"]], reads_2 = cts[["gene"]], k = 2, cell_data_obj = seu, suppress_plots = F)
 
 ## write new 'alleles' file
 write(top_alleles, file.path(dirs_path, paste0(substr(samples[1],1,nchar(samples[1])-3), "_guided", "_top_alleles.csv")))
@@ -291,7 +300,7 @@ write(top_alleles, file.path(dirs_path, paste0(substr(samples[1],1,nchar(samples
 ```
 ## SECTION 6: Run scrHLAtag (2nd or later iteration(s) guided by HLA top allele candidates)
 
-```{bash}
+```bash
 ##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
 
 ## load modules
@@ -326,13 +335,22 @@ squeue -u skanaan
 ```
 ## SECTION 7: Creating the HLA matrix in the Seurat embedding 
 
-```{r}
-## a list of pre-processed and saved Seurat objects, in our example just one:
-rds <- c(
-  "220926_seuratObj_AML401_celltype_genotype.RDS"
-  )          
-names(rds) <- c("AML_401")
-samp <- 1
+```r
+## You can reconstruct any Seurat object from the barcodes.tsv, metadata.csv, features.tsv, and matrix.mtx files available in GEO
+expr_matrix <- readMM(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_matrix.mtx.gz"))
+rownames(expr_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_features.tsv.gz"), header=F)$V1
+colnames(expr_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_barcodes.tsv.gz"), header=F)$V1
+metadata <- data.frame(fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_metadata.csv"), header=T), row.names=1)
+seu <- CreateSeuratObject(counts = expr_matrix, project = "AML4_d90")
+#make sure the metadata barcodes are the same as the seu barcodes
+identical(metadata, metadata[colnames(seu), , drop = F])
+seu <- AddMetaData(seu, metadata)
+#if UMAP backed up in metadata, use them:
+umap_df <- data.frame(seu$UMAP_1_backup, seu$UMAP_2_backup)
+colnames(umap_df) <- c(1,2)
+seu@reductions$umap <- CreateDimReducObject(embeddings = as.matrix(umap_df), key = "umap_")
+rm(expr_matrix, metadata, umap_df)
+
 seu<-readRDS(file.path(CDS_DIR, rds[samp]))
 samples<-unique(sapply(colnames(seu), function(i){
   i<-strsplit(i, "_")
@@ -347,26 +365,28 @@ dirs<- lapply(dirs, dir, pattern = "^guid", recursive = F, full.names = T) %>% u
 dirnames <- c("AML401_BM", "AML401_34") # this is how the samples were organized in the directories
 
 ## Load the counts files
-cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
+cts <- HLA_load(directories = dirs, dir_names = dirnames, cell_data_obj = seu)
 
 ## define the recipient-specific and donor-specific HLA alleles if known. For example:
-rp = c("A*24:02:01", "B*48:01:01", "C*08:06", "DMA*01:02:01", "DPA1*01:03:01", "DPB1*04:02:01", "DQA1*03:03:01", "DQB1*03:01:01", "DRA*01:01:01", "DRB1*04:01:01", "DRB4*01:03:02", "E*01:03:02", "F*01:01:01")
+rp = c("A*24:02:01", "B*48:01:01", "C*08:06", "DMA*01:02:01", "DPA1*01:03:01", "DPB1*04:02:01", "DQA1*03:03:01", "DQB1*03:01:01", "DRA*01:01:01", "DRB1*04:01:01", "DRB4*01:03:02", "E*01:03:02", "F*01:01:01", "TAP2*02:05")
 dn = c("A*33:03:01", "B*42:01:01", "C*17:01:01", "DPA1*03:01:01", "DPB1*105:01:01", "E*01:01:01", "F*01:01:02", "Y*02:01")
 
 ## Run HLA_matrix
-hla <- HLA_Matrix(reads = cts[["mRNA"]], seu = seu, 
+hla <- HLA_Matrix(reads = cts[["mRNA"]], cell_data_obj = seu, 
                   CB_rev_com = F,    # TRUE for 3prime 10x on pacbio
                   hla_recip = rp,
                   hla_donor = dn,
                   # remove_alleles = c("MICA*008:01:01", "DOB*01:01:03", "G*01:01:01", "DPB2*01:01:02"),
                   return_stats = F,
                   parallelize = F)
-seu[["HLA"]] <- hla
-
-## HLA expression visuals
+HLA.assay <- CreateAssayObject(counts = hla)
+# map the alleles into seurat
+suppressWarnings(seu@assays$HLA <- HLA.assay)
+# normalize
 DefaultAssay(seu) <- "HLA"
 seu <- NormalizeData(seu, normalization.method = "LogNormalize", scale.factor = 100)
 
+## HLA expression visuals
 j <- 10 # plot title size
 thm <- theme(legend.position = "none", axis.line = element_blank(), axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank(), plot.title = element_text(size = j))
 

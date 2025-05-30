@@ -66,12 +66,12 @@ packageVersion("scrHLAmatrix")
 options(warn=-1) #to suppress warnings globaly. options(warn=0) to get them back
 
 ## color palette
-bmcols <- viewmastR::sfc(16)[c(1:3, 5:16)]
+bmcolsl <- viewmastR::sfc(16)[c(1:3, 5:16)]
 names(bmcolsl)<-c("01_HSC", "02_Early_Erythroid","03_Late_Erythroid","04_Myeloid_Progenitor","05_Lymphoid_Progenitor","06_pDC","07_cDC","08_CD14_Monocyte","09_CD16_Monocyte","10_Other","11_Pre_B","12_B", "13_Plasma","14_T" ,"15_NK")
 
 ```
 
-## Fig.1 and Suppl.Fig.S3 
+## Fig.1 and Suppl.Fig.S5 
 # Building the method with samples from AML1 with 5' and 3' captures
 
 ```{r}
@@ -95,7 +95,7 @@ seu<-readRDS(file.path("/fh/fast/furlan_s/user/skanaan/scrHLAtyping/_R_ANALYSES/
 #                        "220919_seuratObj_AML101_celltype_genotype.RDS")) # 3' rds
 
 ## Load the counts files
-cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
+cts <- HLA_load(directories = dirs, dir_names = dirnames, cell_data_obj = seu)
 
 ## Visualize
 plot_top_alleles <- Top_HLA_plot_bulk(reads_1 = cts[["mRNA"]], 
@@ -110,16 +110,16 @@ plot_top_alleles # for best visuals: 12 x 8 in
 dirs_path <- "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/5_E01" # 5' files
 # dirs_path <- "/fh/fast/furlan_s/grp/data/targ_reseq/01_scrHLA_project/231020_longreadTSO_HLA_MDS_DB_LA_MO_EWS/3_C01" # 3' files
 dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
-dirs<- lapply(dirs, dir, pattern = "^guided3", recursive = F, full.names = T) %>% unlist
+dirs<- lapply(dirs, dir, pattern = "^guided4", recursive = F, full.names = T) %>% unlist
 dirnames <- c("AML_F_5", "AML_E_5", "AML401_BM", "AML401_34") # this is how the 5' samples were organized in the directories
 # dirnames <- c("Pre_Ifng_4", "Post_Ifng_4", "AML_E_3", "MO1_IP_1") # this is how the 3' samples were organized in the directories
 
 ## Load the counts files
-cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
+cts <- HLA_load(directories = dirs, dir_names = dirnames, cell_data_obj = seu)
 
 ## Visualize
 top_per_CB <- Top_HLA_plot_byCB(reads = cts[["mRNA"]],
-                                 seu = seu,
+                                 cell_data_obj = seu,
                                  hla_with_counts_above = 0,
                                  CBs_with_counts_above = 0,
                                  # cluster_index = 1, # 1 then 2 for the other HLA cluster
@@ -135,20 +135,23 @@ top_per_CB[[1]] %>% grid.arrange() # for best visuals: 16 x 8 in
 DimPlot_scCustom(seu, group.by = "celltype", colors_use = bmcolsl, pt.size = 0.4)
 DimPlot_scCustom(seu, group.by = "geno", label = F, pt.size = 0.1,order = sort(unique(seu$geno), decreasing = T))+scale_color_manual(values=c("grey65", "red"))
 
-#------ Fig.1e, Suppl.Fig.S3 ------#
+#------ Fig.1e, Suppl.Fig.S5 ------#
 ## if you have an idea of what might be the donor specific and recipient specific alleles 
 ## (if not run HLA_Matrix() without, and see if you can guess)
 rp <- c("DMA*01:02:01")
 dn <- c("DMB*01:03:01")
 
 ## Run HLA_Matrix() 
-hla <- HLA_Matrix(reads = cts[["mRNA"]], seu = seu, 
+hla <- HLA_Matrix(reads = cts[["mRNA"]], cell_data_obj = seu, 
                   CB_rev_com = F,    # TRUE for 3prime 10x on pacbio
                   hla_recip = rp,
                   hla_donor = dn,
                   return_stats = F,
                   parallelize = F)
-if (class(hla) == "Assay") {suppressWarnings(seu[["HLA"]] <- hla)} else if (class(hla) == "list") {suppressWarnings(seu[["HLA"]] <- hla[["matrix"]])}
+HLA.assay <- CreateAssayObject(counts = hla)
+# map the alleles into seurat
+suppressWarnings(seu@assays$HLA <- HLA.assay)
+# normalize
 DefaultAssay(seu) <- "HLA"
 seu <- NormalizeData(seu, normalization.method = "LogNormalize", scale.factor = 100)
 FeatP <- c()
@@ -222,14 +225,21 @@ ggplot(pr_expgg, aes(x= as.factor(souporcell_geno), y= Proportions, fill = as.fa
 # read numbers Iso-Seq vs. MAS-seq
 
 ```{r}
-## a list of pre-processed and saved Seurat objects, in our example just one:
-## AML4 day 90 post-tx
-rds <- c(
-  "220926_seuratObj_AML401_celltype_genotype.RDS.RDS"
-  )          
-names(rds) <- c("AML_401")
-samp <- 1
-seu<-readRDS(file.path(CDS_DIR, rds[samp]))
+## You can reconstruct any Seurat object from the barcodes.tsv, metadata.csv, features.tsv, and matrix.mtx files available in GEO
+expr_matrix <- readMM(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_matrix.mtx.gz"))
+rownames(expr_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_features.tsv.gz"), header=F)$V1
+colnames(expr_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_barcodes.tsv.gz"), header=F)$V1
+metadata <- data.frame(fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_metadata.csv"), header=T), row.names=1)
+seu <- CreateSeuratObject(counts = expr_matrix, project = "AML4_d90")
+#make sure the metadata barcodes are the same as the seu barcodes
+identical(metadata, metadata[colnames(seu), , drop = F])
+seu <- AddMetaData(seu, metadata)
+#if UMAP backed up in metadata, use them:
+umap_df <- data.frame(seu$UMAP_1_backup, seu$UMAP_2_backup)
+colnames(umap_df) <- c(1,2)
+seu@reductions$umap <- CreateDimReducObject(embeddings = as.matrix(umap_df), key = "umap_")
+rm(expr_matrix, metadata, umap_df)
+
 samples<-unique(sapply(colnames(seu), function(i){
   i<-strsplit(i, "_")
   paste(i[[1]][1:length(i[[1]])-1], collapse = "_")  
@@ -243,26 +253,28 @@ dirs<- lapply(dirs, dir, pattern = "^guid", recursive = F, full.names = T) %>% u
 dirnames <- c("AML401_BM", "AML401_34") # this is how the samples were organized in the directories
 
 ## Load the counts files
-cts <- HLA_load(directories = dirs, dir_names = dirnames, seu = seu)
+cts <- HLA_load(directories = dirs, dir_names = dirnames, cell_data_obj = seu)
 
 ## define the recipient-specific and donor-specific HLA alleles if known. For example:
-rp = c("A*24:02:01", "B*48:01:01", "C*08:06", "DMA*01:02:01", "DPA1*01:03:01", "DPB1*04:02:01", "DQA1*03:03:01", "DQB1*03:01:01", "DRA*01:01:01", "DRB1*04:01:01", "DRB4*01:03:02", "E*01:03:02", "F*01:01:01")
+rp = c("A*24:02:01", "B*48:01:01", "C*08:06", "DMA*01:02:01", "DPA1*01:03:01", "DPB1*04:02:01", "DQA1*03:03:01", "DQB1*03:01:01", "DRA*01:01:01", "DRB1*04:01:01", "DRB4*01:03:02", "E*01:03:02", "F*01:01:01", "TAP2*02:05")
 dn = c("A*33:03:01", "B*42:01:01", "C*17:01:01", "DPA1*03:01:01", "DPB1*105:01:01", "E*01:01:01", "F*01:01:02", "Y*02:01")
 
 ## Run HLA_matrix
-hla <- HLA_Matrix(reads = cts[["mRNA"]], seu = seu, 
+hla <- HLA_Matrix(reads = cts[["mRNA"]], cell_data_obj = seu, 
                   CB_rev_com = F,    # TRUE for 3prime 10x on pacbio
                   hla_recip = rp,
                   hla_donor = dn,
-                  # remove_alleles = c("MICA*008:01:01", "DOB*01:01:03", "G*01:01:01", "DPB2*01:01:02"),
                   return_stats = F,
                   parallelize = F)
-seu[["HLA"]] <- hla
+HLA.assay <- CreateAssayObject(counts = hla)
+# map the alleles into seurat
+suppressWarnings(seu@assays$HLA <- HLA.assay)
+# normalize
+DefaultAssay(seu) <- "HLA"
+seu <- NormalizeData(seu, normalization.method = "LogNormalize", scale.factor = 100)
 
 #------ Fig.2c, Suppl.Fig.S8e ------#
 ## HLA expression visuals
-DefaultAssay(seu) <- "HLA"
-seu <- NormalizeData(seu, normalization.method = "LogNormalize", scale.factor = 100)
 
 FeatP <- c()
 for (i in 1:length(row.names(seu))) {
@@ -334,21 +346,21 @@ ggplot(perstep_stats[perstep_stats$step %in% c("0_Starting counts", "1_1st Corr.
 
 ## Visualize HLA counts vs. corresponding HLA gene in the RNA assay Sup Fig S8d
 ## testing
-seu[["HLA"]]@data[1:3,1:3]
-seu[["HLA"]]@counts[1:3,1:3]
-row.names(seu[["HLA"]])
+seu@assays$HLA$data[1:3,1:3]
+seu@assays$HLA$counts[1:3,1:3]
+row.names(seu@assays$HLA)
 
 ## visualizing
 DefaultAssay(seu) <- "HLA"
 hla_gene <- "A"
-select_hla <- row.names(seu[["HLA"]])[grep(paste0("^", hla_gene), row.names(seu[["HLA"]]))]
+select_hla <- row.names(seu@assays$HLA)[grep(paste0("^", hla_gene), row.names(seu@assays$HLA <- HLA.assay))]
 select_rna <- paste0("HLA-", hla_gene)
 soup <- 1 # souporcell 1 or 2
 {
   seu_sub <- seu[ , rownames(seu@meta.data)[seu@meta.data$geno == sort(unique(seu@meta.data$geno))[soup]]]
   long_df <- cbind(
-    seu_sub[["HLA"]]@counts[select_hla, , drop = F] %>% as.data.frame() %>% t(),
-    seu_sub[["RNA"]]@counts[select_rna, , drop = F] %>% as.data.frame() %>% t()
+    seu_sub@assays$HLA$counts[select_hla, , drop = F] %>% as.data.frame() %>% t(),
+    seu_sub@assays$RNA$counts[select_rna, , drop = F] %>% as.data.frame() %>% t()
   ) %>% as.data.frame() %>% reshape2::melt(., id.vars = select_rna, measure.vars = select_hla, variable.name = "HLA",)
   hla_rp <- gsub("[_*|?.+$^]", "-", rp)
   hla_dn <- gsub("[_*|?.+$^]", "-", dn)
@@ -409,15 +421,15 @@ hla_dn <- gsub("[_*|?.+$^]", "-", dn)
   named_pal <- c()
   hla_gene <- c("A", "DRA", "E")
   for (a in seq_along(hla_gene)) {
-    select_hla <- row.names(seu[["HLA"]])[grep(paste0("^", hla_gene[a]), row.names(seu[["HLA"]]))]
+    select_hla <- row.names(seu@assays$HLA)[grep(paste0("^", hla_gene[a]), row.names(seu@assays$HLA))]
     select_adt <- paste0("HLA-", hla_gene[a], ".1")
     #ct <- levels(sort(unique(seu@meta.data$celltype)))
     for (soup in seq_along(sort(unique(seu@meta.data$geno)))) {
       seu_sub <- seu[ , rownames(seu@meta.data)[seu@meta.data$geno == sort(unique(seu@meta.data$geno))[soup]]]
       # seu_sub <- seu_sub[ , rownames(seu_sub@meta.data)[seu_sub@meta.data$celltype %in% ct[c(CT)] ]]
       long_df <- cbind(
-        seu_sub[["HLA"]]@counts[select_hla, , drop = F] %>% as.data.frame() %>% t(),
-        seu_sub[["ADT"]]@data[select_adt, , drop = F] %>% as.data.frame() %>% t(),
+        seu_sub@assays$HLA$counts[select_hla, , drop = F] %>% as.data.frame() %>% t(),
+        seu_sub@assays$ADT$data[select_adt, , drop = F] %>% as.data.frame() %>% t(),
         seu_sub@meta.data[ ,"celltype", drop = F] %>% as.data.frame()
       ) %>% as.data.frame() %>% reshape2::melt(., id.vars = c(select_adt, "celltype"), measure.vars = select_hla, variable.name = "HLA",)
       colnames(long_df)[colnames(long_df) == select_adt] <- "ADT_value"
@@ -555,15 +567,15 @@ ct[CT]
   named_pal <- c()
   hla_gene <- c("A", "DRA", "E")
   for (a in seq_along(hla_gene)) {
-    select_hla <- row.names(seu[["HLA"]])[grep(paste0("^", hla_gene[a]), row.names(seu[["HLA"]]))]
+    select_hla <- row.names(seu@assays$HLA)[grep(paste0("^", hla_gene[a]), row.names(seu@assays$HLA))]
     select_adt <- paste0("HLA-", hla_gene[a], ".1")
     #ct <- levels(sort(unique(seu@meta.data$celltype)))
     for (soup in seq_along(sort(unique(seu@meta.data$geno)))) {
       seu_sub <- seu[ , rownames(seu@meta.data)[seu@meta.data$geno == sort(unique(seu@meta.data$geno))[soup]]]
       seu_sub <- seu_sub[ , rownames(seu_sub@meta.data)[seu_sub@meta.data$celltype %in% ct[c(CT)] ]]
       long_df <- cbind(
-        seu_sub[["HLA"]]@counts[select_hla, , drop = F] %>% as.data.frame() %>% t(),
-        seu_sub[["ADT"]]@data[select_adt, , drop = F] %>% as.data.frame() %>% t(),
+        seu_sub@assays$HLA$counts[select_hla, , drop = F] %>% as.data.frame() %>% t(),
+        seu_sub@assays$ADT$data[select_adt, , drop = F] %>% as.data.frame() %>% t(),
         seu_sub@meta.data[ ,"celltype", drop = F] %>% as.data.frame()
       ) %>% as.data.frame() %>% reshape2::melt(., id.vars = c(select_adt, "celltype"), measure.vars = select_hla, variable.name = "HLA",)
       colnames(long_df)[colnames(long_df) == select_adt] <- "ADT_value"
@@ -615,7 +627,7 @@ ct[CT]
 }
 ```
 
-## Fig.4, Suppl.Fig.S11
+## Fig.4, Suppl.Fig.S12
 ## small changes in HLA haplotype
 
 ```{r}
@@ -623,23 +635,26 @@ ct[CT]
 #------ Fig.4a -----#
 ## HLA gene positions according to hg38
 
-#------ Fig.4b, Suppl.Fig.S11a ------#
+#------ Fig.4b, Suppl.Fig.S12a ------#
 ## genotype is deduced by looking at the HLA expression in each genotype class 
 ## and confirming by available clinical data
 
-#------ Suppl.Fig.S11b ------#
+#------ Suppl.Fig.S12b ------#
 ## DimPlot of the viewmastR output
 DimPlot_scCustom(seu, group.by = "celltype", colors_use = bmcolsl, pt.size = 0.4)
 
-#------ Fig.4c, Suppl.Fig.S11c ------#
-DimPlot_scCustom(seu, group.by = "malignant", reduction = "umap", pt.size=0.4, colors_use = c("grey85", "red", "violetred4", "black"), order = c("Rcp_Malignant","Rcp_Healthy", "Don_Healthy")) +scale_color_manual(values= c("grey85", "red", "violetred4", "black"), drop=F) # drop=F to show a level in legend even if it is unused in the plot (4in x 6in)
+#------ Fig.4c, Suppl.Fig.S12c ------#
+pal_malig <- c(Don_Healthy = "grey85", Rcp_Healthy = "red", Rcp_Malignant ="violetred4")
+seu@active.ident
+DimPlot_scCustom(seu, group.by = "malignant", reduction = "umap", pt.size=0.4, shuffle = T, seed = 100) +scale_color_manual(values= pal_malig, drop=F) # drop=F to show a level in legend even if it is unused in the plot (4in x 6in)
 
 DefaultAssay(seu) <- "HLA"
 Idents(seu)<-seu$malignant
 old.lvl<-levels(Idents(seu)) %>% sort()
 Idents(seu) <- factor(Idents(seu), levels = old.lvl)
 rm(old.lvl)
-{ # run this chunk to generate the figure
+# run this chunk to generate the figure
+{
   av.expr1 <- assay(muscat::aggregateData(as.SingleCellExperiment(seu), by = c("ident"), fun = "mean")) %>% as.data.frame() %>% suppressWarnings() 
   av.expr2 <- assay(muscat::aggregateData(as.SingleCellExperiment(seu), by = c("ident"), fun = "prop.detected")) %>% as.data.frame() %>% suppressWarnings()
   if (length(colnames(av.expr1)) < length(levels(Idents(seu)))) { #check if levels of seu idents are equal to the cols in the av.expr dataframes
@@ -675,29 +690,31 @@ rm(old.lvl)
   av.expr3 <- split(data.table::setDT(av.expr3), by = "hla") 
   av.expr4 <- split(data.table::setDT(av.expr4), by = "hla")
   fun.ratio <- function(df) {
+    df <- data.table::setDF(df)
     if (any(grepl("shared", df$AlleleOrigin))) {
-      dh <- df$Don_Healthy[grepl("shared", df$AlleleOrigin)]
-      rh <- df$Rcp_Healthy[grepl("shared", df$AlleleOrigin)]
-      rm <- df$Rcp_Malignant[grepl("shared", df$AlleleOrigin)]
-      # get the ratios over the shared allele value
-      df$Don_Healthy <- df$Don_Healthy/dh
-      df$Rcp_Healthy <- df$Rcp_Healthy/rh
-      df$Rcp_Malignant <- df$Rcp_Malignant/rm
+      lv <- list()
+      for (i in 1:length(levels(Idents(seu)))) {
+        # chosing the value of the "shared" allele for a given HLA gene
+        lv[[i]] <- df[,i][grepl("shared", df$AlleleOrigin)]
+        # get the ratios over the shared allele value
+        df[,i] <- df[,i]/lv[[i]][[1]]
+      }
     } else {
-      df$Don_Healthy <- NA
-      df$Rcp_Healthy <- NA
-      df$Rcp_Malignant <- NA
+      for (i in 1:length(levels(Idents(seu)))) {
+        df[,i] <- NA
+      }
     }
+    df <- data.table::setDT(df)
     return(df)
   }
   av.expr3 <- pbmcapply::pbmclapply(av.expr3, fun.ratio, mc.cores = 1) 
   av.expr4 <- pbmcapply::pbmclapply(av.expr4, fun.ratio, mc.cores = 1) 
   av.expr3 <- data.table::rbindlist(av.expr3)
   av.expr4 <- data.table::rbindlist(av.expr4)
-  av.expr.mlt1 <- reshape2::melt(av.expr1, id.vars = "AlleleOrigin", measure.vars = colnames(av.expr1[,c(1:3)]), variable.name = "cell_grp",)
-  av.expr.mlt2 <- reshape2::melt(av.expr2, id.vars = "AlleleOrigin", measure.vars = colnames(av.expr2[,c(1:3)]), variable.name = "cell_grp",)
-  av.expr.mlt3 <- reshape2::melt(av.expr3, id.vars = "AlleleOrigin", measure.vars = colnames(av.expr3[,c(1:3)]), variable.name = "cell_grp",)
-  av.expr.mlt4 <- reshape2::melt(av.expr4, id.vars = "AlleleOrigin", measure.vars = colnames(av.expr4[,c(1:3)]), variable.name = "cell_grp",)
+  av.expr.mlt1 <- reshape2::melt(av.expr1, id.vars = "AlleleOrigin", measure.vars = colnames(av.expr1[,1:length(levels(Idents(seu)))]), variable.name = "cell_grp",)
+  av.expr.mlt2 <- reshape2::melt(av.expr2, id.vars = "AlleleOrigin", measure.vars = colnames(av.expr2[,1:length(levels(Idents(seu)))]), variable.name = "cell_grp",)
+  av.expr.mlt3 <- reshape2::melt(av.expr3, id.vars = "AlleleOrigin", measure.vars = colnames(av.expr3[,1:length(levels(Idents(seu)))]), variable.name = "cell_grp",)
+  av.expr.mlt4 <- reshape2::melt(av.expr4, id.vars = "AlleleOrigin", measure.vars = colnames(av.expr4[,1:length(levels(Idents(seu)))]), variable.name = "cell_grp",)
   colnames(av.expr.mlt1)[which(names(av.expr.mlt1) == "value")] <- "MeanNormExpr"
   colnames(av.expr.mlt2)[which(names(av.expr.mlt2) == "value")] <- "PropExpr"
   colnames(av.expr.mlt3)[which(names(av.expr.mlt3) == "value")] <- "MeanNormExprRatioOverShared"
@@ -709,12 +726,12 @@ rm(old.lvl)
   av.expr.mlt$gene_pos <- av.expr1$gene_pos
   rm(av.expr.mlt1,av.expr.mlt2,av.expr.mlt3,av.expr.mlt4)
   av.expr.mlt$under_press_MeanNormExprRatioOverShared <- ifelse(
-    (grepl("don", av.expr.mlt$AlleleOrigin, ignore.case = T) & grepl("don", av.expr.mlt$cell_grp, ignore.case = T)) | 
-      (grepl("recip", av.expr.mlt$AlleleOrigin, ignore.case = T) & grepl("rcp", av.expr.mlt$cell_grp, ignore.case = T)), av.expr.mlt$MeanNormExprRatioOverShared, NA
+    (grepl("d[[:alnum:]]*n", av.expr.mlt$AlleleOrigin, ignore.case = T) & grepl("d[[:alnum:]]*n", av.expr.mlt$cell_grp, ignore.case = T)) | 
+      (grepl("r[[:alnum:]]*p", av.expr.mlt$AlleleOrigin, ignore.case = T) & grepl("r[[:alnum:]]*p", av.expr.mlt$cell_grp, ignore.case = T)), av.expr.mlt$MeanNormExprRatioOverShared, NA
   )# identify under pressure alleles (the non-shared allele)
   av.expr.mlt$under_press_PropExprRatioOverShared <- ifelse(
-    (grepl("don", av.expr.mlt$AlleleOrigin, ignore.case = T) & grepl("don", av.expr.mlt$cell_grp, ignore.case = T)) | 
-      (grepl("recip", av.expr.mlt$AlleleOrigin, ignore.case = T) & grepl("rcp", av.expr.mlt$cell_grp, ignore.case = T)), av.expr.mlt$PropExprRatioOverShared, NA
+    (grepl("d[[:alnum:]]*n", av.expr.mlt$AlleleOrigin, ignore.case = T) & grepl("d[[:alnum:]]*n", av.expr.mlt$cell_grp, ignore.case = T)) | 
+      (grepl("r[[:alnum:]]*p", av.expr.mlt$AlleleOrigin, ignore.case = T) & grepl("r[[:alnum:]]*p", av.expr.mlt$cell_grp, ignore.case = T)), av.expr.mlt$PropExprRatioOverShared, NA
   )
   av.expr.mlt$under_press_MeanNormExprRatioOverShared[is.infinite(av.expr.mlt$under_press_MeanNormExprRatioOverShared)] <- NA
   av.expr.mlt$under_press_PropExprRatioOverShared[is.infinite(av.expr.mlt$under_press_PropExprRatioOverShared)] <- NA
@@ -736,23 +753,19 @@ rm(old.lvl)
     theme(text = element_text(size = 11),axis.title.x=element_blank(),axis.title.y=element_blank(),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) # 3.25x5 in  then scale 60%
 }
 
+
 #------ Fig.4d ------#
 pal4 <- c("grey85", "red", "violetred4")
-Stacked_VlnPlot(seu, features = c(row.names(seu)[29], row.names(seu)[28]), #DRB1
+Stacked_VlnPlot(seu, features = c("DRB1-04:01:01", "DRB1-03:02:01"), #DRB1
                 x_lab_rotate = TRUE, split.by = "malignant", colors_use = pal4, plot_legend =T)
 
-#------ Fig.4e, Suppl.Fig.S11d ------#
-{
-  ## Adding the p-values from Chi.square testing 
+#------ Fig.4e, Suppl.Fig.S12d ------#
+
+{ ## Adding the p-values from Chi.square testing 
   # make sure the idents are still from the metadata col that you want
   Idents(seu)
-  # if not, reset them
-  Idents(seu)<-seu$malignant
-  old.lvl<-levels(Idents(seu)) %>% sort()
-  Idents(seu) <- factor(Idents(seu), levels = old.lvl)
-  rm(old.lvl)
+  seu_malig <- Idents(seu) %>% unique() %>% sort()
   # subset the seu 
-  seu_malig <- seu$malignant %>% unique() %>% sort()
   seus <- c()
   for (i in 1:length(seu_malig)) {
     s <- subset(seu, idents = seu_malig[i])
@@ -762,7 +775,7 @@ Stacked_VlnPlot(seu, features = c(row.names(seu)[29], row.names(seu)[28]), #DRB1
   names(seus) <- seu_malig
   # get the counts from the HLA assay
   seus <- lapply(seus, function(seu){
-    cts <- seu[["HLA"]]@counts %>% as.data.frame()
+    cts <- seu@assays$HLA$counts %>% as.data.frame()
   })
   # a function to summarize counts as zeros and non-zeros
   summarize_cts <- function(cts) {
@@ -801,8 +814,8 @@ Stacked_VlnPlot(seu, features = c(row.names(seu)[29], row.names(seu)[28]), #DRB1
   # identify underpressure allele
   seus <- lapply(seus, function(cts) {
     cts$underprss <- ifelse(
-      (grepl("don", cts$AlleleOrigin, ignore.case = T) & grepl("don", cts$seu_subset, ignore.case = T)) | 
-        (grepl("recip", cts$AlleleOrigin, ignore.case = T) & grepl("rcp", cts$seu_subset, ignore.case = T)), "underpressure", ifelse(grepl("shared", cts$AlleleOrigin, ignore.case = T), "shared/hmz", NA)
+      (grepl("d[[:alnum:]]*n", cts$AlleleOrigin, ignore.case = T) & grepl("d[[:alnum:]]*n", cts$seu_subset, ignore.case = T)) | 
+        (grepl("r[[:alnum:]]*p", cts$AlleleOrigin, ignore.case = T) & grepl("r[[:alnum:]]*p", cts$seu_subset, ignore.case = T)), "underpressure", ifelse(grepl("shared", cts$AlleleOrigin, ignore.case = T), "shared/hmz", NA)
     )
     cts$mlog.pval.chisq <- NA #introduce the p-val for the test later
     cts <- transform(cts, mlog.pval.chisq = as.numeric(mlog.pval.chisq))
@@ -836,20 +849,20 @@ Stacked_VlnPlot(seu, features = c(row.names(seu)[29], row.names(seu)[28]), #DRB1
   av.expr.mlt$mlog.pval.chisq <- ifelse(is.na(av.expr.mlt$under_press_PropExprRatioOverShared), NA, av.expr.mlt$mlog.pval.chisq)
   av.expr.mlt$tmp <- NULL
   allele_cts$tmp <- NULL
-  # a color function:
   col_fun <- circlize::colorRamp2(c(0, 5, 50), 
                                   c("red", "#00FF00", "darkturquoise")) 
   # fix infinities in the minus log p-val (which originate from p-val themselves = 0):
   av.expr.mlt$mlog.pval.chisq[is.infinite(av.expr.mlt$mlog.pval.chisq)] <- max(av.expr.mlt$mlog.pval.chisq[is.finite(av.expr.mlt$mlog.pval.chisq)])
-
+  
   ggplot(av.expr.mlt, aes(x= gene_pos, y=scales::squish(under_press_PropExprRatioOverShared, c(0.1,10)), fill=mlog.pval.chisq))+
     geom_bar(stat="identity", alpha= 1, linetype = 0) +
     scale_x_discrete(label=function(x) sub('...', '', x))+
-    scale_y_log10(name = "", 
+    scale_y_log10(name = "", #proportion recipient (Chimerocyte)
                   breaks = c(0.01, 0.1, 1, 10),
                   labels = c(0.01, 0.1, 1, 10),
                   limits = c(0.1, 10))+
     annotation_logticks(sides = "l", outside = F, short = unit(0.75,"mm"), mid = unit(0.75,"mm"), long = unit(1.5,"mm"), size = 0.25)+
+    # coord_cartesian(clip = "off")+  # Ticks outside plot
     geom_hline(yintercept=1, linetype="dashed", color = "grey30", linewidth = 0.25, alpha = 0.75)+
     scale_fill_gradientn(
       name = "-Log(Pval)\nChi.square",
@@ -862,7 +875,7 @@ Stacked_VlnPlot(seu, features = c(row.names(seu)[29], row.names(seu)[28]), #DRB1
 
 #------ Fig.4f ------#
 ## try it by re-running the chunk of Fig.4c with:
-# Idents(seu)<-seu$geno
+Idents(seu)<-seu$geno
 {
   logpval.thr <- 2
   effect.size.thr <- 2
@@ -881,14 +894,23 @@ Stacked_VlnPlot(seu, features = c(row.names(seu)[29], row.names(seu)[28]), #DRB1
 }
 ```
 
-## Suppl.Fig.S1 
+## Suppl.Fig.S1
+# detecting TP53 and IDH1 mutations in short reads
+
+```{r}
+
+### Details in a separate notebook: "AML1_Bash_and_R_analysis_shortread_mutations.Rmd" ###
+
+```
+
+## Suppl.Fig.S2 
 # getting mm2 defaults, with examples
 
 ```{r}
 
 ## Visualize minimap2 thresholds  
 
-#------ Suppl.Fig.S1a ------#
+#------ Suppl.Fig.S2a ------#
 
 ## Do this for each sample in your cohort, then save the 'mm2_dfs' file on your computer
 #map with the genotypes found in the seurat object
@@ -988,7 +1010,7 @@ for (l in 4:7) {
 
 patchwork::wrap_plots(g, ncol = 1, axes = "collect_x") # 5x5 in
 
-#------ Suppl.Fig.S1b ------#
+#------ Suppl.Fig.S2b ------#
 
 ## verify those cutoffs in examples
 i <- 1 # chose position in object 'genes'
@@ -1043,12 +1065,12 @@ print(p)
 
 ```
 
-## Suppl.Fig.S2 and Suppl.Fig.S4 
+## Suppl.Fig.S3 and Suppl.Fig.S4 
 # Molecular Swap
 
 ```{r}
 
-#------ Suppl.Fig.S2b, S2c, S4b, or S4c------#
+#------ Suppl.Fig.S3b, S3c, S4b, or S4c------#
 ## map with the genotypes found in the seurat object
 ctsu <- cts[["mRNA"]]
 special <- "[_*|?.+$^]"
@@ -1105,7 +1127,7 @@ ra1 <- ref_align[ref_align@ranges@NAMES %like% gn[3]]
 ra2 <- ref_align[ref_align@ranges@NAMES %like% gn[4]]
 BrowseSeqs(AlignSeqs(c(ra1, align[align@ranges@NAMES %like% examples[5]], ra2), verbose = F), highlight=0, colWidth = 200, colorPatterns = F)
 
-#------ Suppl.Fig.S2d ------#
+#------ Suppl.Fig.S3d ------#
 # aggregate molecular swap data shown from running 'HLA_matrix()' on many 5' and 3' HLA captures, save them in .csv
 
 ## molecular swap rates
@@ -1125,7 +1147,7 @@ ggplot(mol_swap, aes(y= swap_type, x= frequency, fill= `10x Chemistry`))+
 
 ```
 
-## Suppl.Fig.S5 
+## Suppl.Fig.S6 
 ## 3prime RNA, Multiome, vs. 5prime RNA
 
 ```{r}
@@ -1141,7 +1163,7 @@ perstep_stats <- mutate(perstep_stats, step = case_when(
   TRUE ~ step # to keep the rest unchanged
 ))
 
-#------ Suppl.Fig.S5a ------#
+#------ Suppl.Fig.S6a ------#
 ggplot(umi_dupl, aes(x= rank, y=n_umi, color = sample))+
   #geom_smooth(size=2, method = "gam")+
   geom_line(linewidth = 0.75)+
@@ -1151,7 +1173,7 @@ ggplot(umi_dupl, aes(x= rank, y=n_umi, color = sample))+
   theme_cowplot()+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+scale_color_manual(values=pal5) # 3x7in
 
-#------ Suppl.Fig.S5b ------#
+#------ Suppl.Fig.S6b ------#
 ggplot(perstep_stats[perstep_stats$step %in% c("0_Starting counts", "1_1st Corr. (step 1)", "3_Dedup (step 3)", "7_Final Corr. (step 7)"),], aes(x= step, y= reads))+
   geom_bar(stat="identity", position=position_dodge(), alpha= 1)+
   scale_y_continuous(name = "number of sequenced reads", 
@@ -1162,7 +1184,7 @@ ggplot(perstep_stats[perstep_stats$step %in% c("0_Starting counts", "1_1st Corr.
   facet_grid(~ sample)+ 
   theme_classic(14)+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) #4x6in
 
-#------ Suppl.Fig.S5c ------#
+#------ Suppl.Fig.S6c ------#
 ggplot(perstep_stats[perstep_stats$step %in% c("0_Starting counts", "1_1st Corr. (step 1)", "3_Dedup (step 3)", "7_Final Corr. (step 7)"),], aes(x= step, y= cb_seu_match_rate))+
   geom_bar(stat="identity", position=position_dodge(), alpha= 1)+
   scale_y_continuous(name = "rate of CBs matching in Seurat", 
@@ -1175,16 +1197,16 @@ ggplot(perstep_stats[perstep_stats$step %in% c("0_Starting counts", "1_1st Corr.
 
 ```
 
-## Suppl.Fig.S6 
+## Suppl.Fig.S7 
 # HLA pattern-based classification of cells (HLA UMAPs)
 # HLA pattern-based classification agreement with souporcell
 
 ```{r}
-#------ Suppl.Fig.S6a & S6b ------#
+#------ Suppl.Fig.S7a & S7b ------#
 
 HLA_umap <- HLA_clusters(reads = cts[["mRNA"]], 
                          k = 2, 
-                         seu = seu,
+                         cell_data_obj = seu,
                          # CB_rev_com = T,  # TRUE for 3prime 10x on pacbio
                          geno_metadata_id = "geno", 
                          method = "consensus",
@@ -1194,15 +1216,6 @@ HLA_umap[[2]]+scale_color_manual(values=c("#b2df8a", "#ff7f00"))+theme_classic()
 HLA_umap[[3]]+scale_color_manual(values=c("grey65", "red"))+theme_classic()
 
 ### Repeat this HLA_clusters() function on any counts file from scrHLAtag to get the classifications from "in between" iterations as well
-
-```
-
-## Suppl.Fig.S7
-# in silico mixes with 3 or more chimeric entities
-
-```{r}
-
-### Details in a separate notebook: "insilico_mixes_withFigs.Rmd" ###
 
 ```
 
@@ -1296,20 +1309,28 @@ plot <- readRDS(file.path(DATA_DIR, "celltype_composition_AML40123.RDS"))
 DimPlot(seu, group.by = "celltype", cols = bmcolsl, split.by = "geno") /plot # 5x7 in then scale down to 75%
 
 #------ Suppl.Fig.S10c ------#
-## it looks like 4 major cell types constitute malignant cells. Let's set them apart
+
+
+## select malignant cells based on seurat clusters, not viewmaster classes
 ## and check if they manifest 'stemness' or 'immortal' properties
 
-seu$malig <- NA
-seu$malig <- ifelse(seu$geno == "Recipient" & seu$celltype %in% c("01_HSC", "02_Early_Erythroid", "04_Myeloid_Progenitor", "08_CD14_Monocyte"), "malignant", "healthy")
-DimPlot_scCustom(seu, group.by = "malig", reduction = "umap", pt.size=0.4, colors_use = c("grey85", "red", "violetred4", "black"))
+pl <- DimPlot(subset(x = seu, subset = geno == "Recipient"))
+mal <- CellSelector(pl, object = NULL, ident = "malig")
+seu$malignant <- NA
 seu$malignant <- ifelse(seu$geno == "Recipient", "Rcp_Healthy", "Don_Healthy")
-seu$malignant <- ifelse(seu$malig == "malignant", "Rcp_Malignant", seu$malignant)
+seu$malignant <- ifelse(colnames(seu) %in% mal, "Rcp_Malignant", seu$malignant)
 Idents(seu)<-seu$malignant
 old.lvl<-levels(Idents(seu)) %>% sort()
+# old.lvl<- c("Rcp_Malignant", "Rcp_Healthy", "Don_Healthy") %>% sort() #in case you want to force specify the levels
 seu$malignant <- factor(seu$malignant, levels = old.lvl)
 seu@active.ident <- factor(seu@active.ident, levels = old.lvl)
 levels(seu)
 rm(old.lvl)
+#display malignant cells
+pal_malig <- c(Don_Healthy = "grey85", Rcp_Healthy = "red", Rcp_Malignant ="violetred4")
+seu@active.ident
+DimPlot_scCustom(seu, group.by = "malignant", reduction = "umap", pt.size=0.4, shuffle = T, seed = 100) +scale_color_manual(values= pal_malig, drop=F) # drop=F to show a level in legend even if it is unused in the plot (4in x 6in)
+
 
 DefaultAssay(seu) <- "RNA"
 Stacked_VlnPlot(seu, features = c("HOXA3", "HOXA4", "HOXA5", "HOXA7", "HOXA9", "HOXA10", "MEIS1"),
@@ -1317,7 +1338,25 @@ Stacked_VlnPlot(seu, features = c("HOXA3", "HOXA4", "HOXA5", "HOXA7", "HOXA9", "
 
 ```
 
-## Suppl.Fig.S12
+## Suppl.Fig.S11
+# fusion detection in AML4 by long-read pulldown
+
+```{r}
+
+### Details in a separate notebook: "AML4d90_example_for_GeneFusion_workflow.Rmd" ###
+
+```
+
+## Suppl.Fig.S13
+# in silico mixes with 3 or more chimeric entities
+
+```{r}
+
+### Details in a separate notebook: "insilico_mixes_withFigs.Rmd" ###
+
+```
+
+## Suppl.Fig.S14
 # HLA pattern-based clustering accuracy as a function of the abundance of mismatched alleles between Recip and Donor
 
 ```{r}
@@ -1325,7 +1364,7 @@ Stacked_VlnPlot(seu, features = c("HOXA3", "HOXA4", "HOXA5", "HOXA7", "HOXA9", "
 ## Running the HLA classifier
 HLA_umap <- HLA_clusters(reads = cts[["mRNA"]], 
                          k = 2, 
-                         seu = seu,
+                         cell_data_obj = seu,
                          # CB_rev_com = T,  # TRUE for 3prime 10x on pacbio
                          geno_metadata_id = "geno", 
                          method = "consensus",
@@ -1365,7 +1404,7 @@ ggplot(rp.dn.predval, aes(x= MMlevel, y= rp.dn.pred.val)) +
 
 ```
 
-## Suppl.Fig.S13
+## Suppl.Fig.S15
 ## Sequence similarities in the reference library
 
 ```{r}
@@ -1416,7 +1455,7 @@ ref_length <- data.table::rbindlist(ref_length)
 # how many outliers do we have?
 sum(!is.na(ref_length$north.outlier)) # very manageable number!
 
-#------ Suppl.Fig.S13 ------#
+#------ Suppl.Fig.S15 ------#
 
 # after checking all outliers, we identified alleles to which PacBio reads 
 # are highly likely to align instead of the true allele if they are in the ref
@@ -1426,7 +1465,7 @@ ra1 <- ref_align[ref_align@ranges@NAMES %like% "A\\|03:437Q"]
 ra2 <- ref_align[ref_align@ranges@NAMES %like% "A\\|03:01:01"]
 ra1 <- ref_align[ref_align@ranges@NAMES %like% "B\\|13:123Q"]
 ra2 <- ref_align[ref_align@ranges@NAMES %like% "B\\|13:02:01"]
-ra1 <- ref_align[ref_align@ranges@NAMES %like% "C\\|04:09N"]
+ra1 <- ref_align[ref_align@ranges@NAMES %like% "C\\|04:09L"]
 ra2 <- ref_align[ref_align@ranges@NAMES %like% "C\\|04:01:01"]
 ra1 <- ref_align[ref_align@ranges@NAMES %like% "C\\|04:61N"]
 ra2 <- ref_align[ref_align@ranges@NAMES %like% "C\\|04:01:01"]

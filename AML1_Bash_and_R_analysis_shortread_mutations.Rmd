@@ -1,0 +1,234 @@
+---
+title: "AML1_mutations_shortread"
+author: "SBK"
+date: "4/3/2025"
+output: html_document
+---
+
+## SECTION 1: Running mutCaller on hybridization captur short read seq data
+```{bash}
+## Mutcaller using star
+
+ml minimap2/2.24-GCCcore-11.2.0
+ml SAMtools/1.16.1-GCC-11.2.0
+cd /fh/scratch/delete90/furlan_s/targ_reseq/220819_DB_LK_pulldown_ScottRun/mutcallR_0.5
+export floc=/fh/scratch/delete90/furlan_s/demux/220819_VH00738_64_AAC7KWHM5/AAC7KWHM5/outs/fastq_path/AAC7KWHM5/
+ls $floc
+samps=(AML_101_BM_SNP_Lib_S1 AML_101_34_SNP_Lib_S2)
+export fa=/fh/fast/furlan_s/grp/refs/GRCh38/refdata-gex-GRCh38-2020-A/star
+export id=targ_reseq/220819_DB_LK_pulldown_ScottRun/mutcallR_0.5
+export bc=~/develop/mutCaller/data/737K-august-2016.txt.gz 
+# sample=${samps[7]}
+
+for sample in ${samps[@]}; do
+export samp=${sample}
+export OUT=/fh/scratch/delete90/furlan_s/${id}/${samp}
+mkdir -p $OUT
+cd $OUT
+cat > variants.csv << EOL
+seq,start,ref_nt,query_nt,name
+chr12,112450407,A,G,PTPN11_227A>G
+chr2,208248389,G,A,IDH1_132G>A
+chr17,7674220,C,T,TP53_248C>T
+EOL
+cat variants.csv | sed 's/,/\t/g' > variants.tsv
+
+sbatch -n 1 -c 30 --mem-per-cpu=21000MB --wrap='fq1l1="${floc}${samp}_L001_R1_001.fastq.gz" &&
+fq2l1="${floc}${samp}_L001_R2_001.fastq.gz" &&
+mutcaller UNALIGNED -v -t 30 -g $fa -b $bc -s variants.tsv -a STAR -l /app/software/CellRanger/7.1.0/lib/bin/STAR -o out_star -i $fq1l1 -j $fq2l1 \
+    --add_aligner_args="--scoreDelOpen 0 --scoreDelBase 0 --scoreInsOpen 0 --scoreInsBase 0 --seedSearchStartLmax 20 --winAnchorMultimapNmax 200 --seedMultimapNmax 100000 --outFilterScoreMinOverLread 0.3 --outFilterMatchNminOverLread 0.3"'
+done
+
+## Mutcaller using mm2
+
+ml minimap2/2.24-GCCcore-11.2.0
+ml SAMtools/1.16.1-GCC-11.2.0
+cd /fh/scratch/delete90/furlan_s/targ_reseq/220819_DB_LK_pulldown_ScottRun/mutcallR_0.5
+export floc=/fh/scratch/delete90/furlan_s/demux/220819_VH00738_64_AAC7KWHM5/AAC7KWHM5/outs/fastq_path/AAC7KWHM5/
+ls $floc
+samps=(AML_101_BM_SNP_Lib_S1 AML_101_34_SNP_Lib_S2 AML_102_BM_SNP_Lib_S3 AML_102_34_SNP_Lib_S4 AML_103_BM_SNP_Lib_S5 AML_103_34_SNP_Lib_S6)
+export fa=/fh/fast/furlan_s/grp/refs/GRCh38/refdata-gex-GRCh38-2020-A/fasta/genome.fa
+export id=targ_reseq/220819_DB_LK_pulldown_ScottRun/mutcallR_0.5
+export bc=~/develop/mutCaller/data/737K-august-2016.txt.gz 
+# sample=${samps[7]}
+
+for sample in ${samps[@]}; do
+export samp=${sample}
+export OUT=/fh/scratch/delete90/furlan_s/${id}/${samp}
+mkdir -p $OUT
+cd $OUT
+cat > variants.csv << EOL
+seq,start,ref_nt,query_nt,name
+chr12,112450407,A,G,PTPN11_227A>G
+chr2,208248389,G,A,IDH1_132G>A
+chr17,7674220,C,T,TP53_248C>T
+EOL
+cat variants.csv | sed 's/,/\t/g' > variants.tsv
+
+sbatch -n 1 -c 30 --mem-per-cpu=21000MB --wrap='fq1l1="${floc}${samp}_L001_R1_001.fastq.gz" &&
+fq2l1="${floc}${samp}_L001_R2_001.fastq.gz" &&
+mutcaller UNALIGNED -v -t 30 -g $fa -b $bc -s variants.tsv -o out_mm2 -i $fq1l1 -j $fq2l1 \
+--add_aligner_args="-ax sr"' 
+done
+
+```
+
+## SECTION 2: Set Environment in R
+```{r, warning=FALSE, message=FALSE, warning=FALSE, echo=F}
+graphics.off()
+rm(list=ls())
+knitr::opts_chunk$set(fig.width=8, fig.height=6,dpi=300,
+                      echo=FALSE, warning=FALSE, message=FALSE)
+knitr::opts_chunk$set(dev.args=list(bg="transparent"))
+ROOT_DIR<-file.path("/Volumes/furlan_s/grp/data/targ_reseq/02_mutcallR_SNP_project")
+stem<-file.path("220819_DB_LK_pulldown_SamiRerun")
+DATA_DIR <- file.path(ROOT_DIR, stem, "data")      # SPECIFY HERE
+RES_DIR  <- file.path(ROOT_DIR,  stem, "res")     # SPECIFY HERE
+RMD_DIR  <- file.path(ROOT_DIR,  stem, "rmd")     # SPECIFY HERE
+CDS_DIR <- file.path(ROOT_DIR,  stem, "cds")
+FIG_DIR <- file.path(ROOT_DIR,  stem, "figs")
+
+suppressPackageStartupMessages({
+  library(monocle3)
+  library(reticulate)
+  library(openxlsx)  
+  library(dplyr)
+  library(Matrix)
+  library(ggplot2)
+  library(rhdf5)
+  library(xfun)
+  library(pals)
+  library(RColorBrewer)
+  library(knitr)
+  library(Seurat)
+  library(patchwork)
+  library(Signac)
+  library(EnsDb.Hsapiens.v86)
+  library(scCustomize)
+  library(stringdist)
+  library(data.table)
+})
+
+
+exp_colors<-c("grey70","#453581", "chartreuse", "red","violetred4", "black")
+exp_colors2<-c("red1", "grey70","yellow1", "goldenrod4", "darkblue")
+
+
+lots_color<-function(n){
+  if(n<434){
+  color = grDevices::colors()[grep('gr(a|e)y', grDevices::colors(), invert = T)]
+  sample(color, n)
+  }else{
+    stop("max 433 colors")
+  }
+}
+
+pal <- viridis::viridis(n = 10, option = "D")
+pal2 <- viridis::viridis(n = 10, option = "C")
+mcols=c(sfc(16)[c(1:3, 5:16)], "grey70")
+bmcols=sfc(16)[c(1:3, 5:16)]
+```
+
+## SECTION 3: Identifying point mutation (mm2)
+```{r}
+## Load Seurat
+## Note: you can reconstruct any Seurat object from the barcodes.tsv, metadata.csv, features.tsv, and matrix.mtx files available in GEO
+seu<-readRDS(file.path("/fh/fast/furlan_s/user/skanaan/scrHLAtyping/_R_ANALYSES/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/cds",
+                       "221010_AML101_addmutations.RDS")) # 5' rds
+
+sample_regex<-"^AML_101"
+l<-list.files(file.path(ROOT_DIR, stem), full.name=T)
+fs<-l[grep(sample_regex, basename(l))]
+
+# IMPORTANT: check the nomenclature used for the barcode prefix:
+unique(seu@meta.data[["dataset"]])
+prefix<-sapply(colnames(seu), function(i){
+  i<-strsplit(i, "_")
+  paste(i[[1]][1:length(i[[1]])-1], collapse = "_")  
+})
+# check how many unique prefixes there are and choose the ones you need in your analysis
+unique(prefix)
+prefixes<-c(unique(prefix)[1], unique(prefix)[2])
+
+# get all names
+file.exists(fs[1])
+table((fread(file.path(fs[1], "outs", "mutCaller","mm2", "counts_mm.txt.gz")) %>% as.data.frame())$V5)
+name <- c()
+name <- append(name, unique((fread(file.path(fs[1], "outs", "mutCaller","mm2", "counts_mm.txt.gz")) %>% as.data.frame())$V5))
+snv <- 3    # an integer to select the SNV to analyze based on its order in "name"
+name[[snv]]
+
+get_data<- function(n, thresh){ # n is the index of the file in `fs`, which is the same as the index of `prefixes` (make sure they match!)
+  dat<-fread(file.path(fs[[n]], "outs", "mutCaller","mm2", "counts_mm.txt.gz")) %>% as.data.frame()
+  # I noticed a glitch in the way barcodes and umis are outputted from mutcaller. need to fix
+  dat<-dat %>%
+    mutate(V2 = paste0(stringr::str_sub(V1, -1, -1), V2),  # Add last char of V1 to start of V2
+           V1 = stringr::str_sub(V1, 1, -2))  # Remove last char from V1
+  # no need to run the previous 3 lines in the newer version of mutCaller as it was fixed
+  colnames(dat)<-c("cb", "umi", "seq", "loc", "name", "call", "count")
+  calls <- intersect( c("ref", "query", "other"), unique(dat$call))
+  nameslice <- c("cb", "name", calls)
+  dat<-dat[dat$count>thresh,]
+  dat<-dat[dat$name==name[[snv]],]
+  countSlice<-function(slice){
+    outslice<-data.frame(cb=slice$cb[1], name = slice$name[1], setNames(as.list(rep(0, length(calls))), calls))
+    wd<-table(LDfunc(slice)$call)
+    for(i in 1:length(wd)){
+      outslice[[names(wd)[i]]]<-as.numeric(wd)[i]
+    }
+    outslice
+  }
+  LDfunc<-function(slice, ldthresh=2){
+    #this function takes a set of data with column umi and column count and tests for similarity between the umis using levenshtein distance (ld).  For rows of data with ld similarity < ldthresh, this function will keep only the row with the highest count value return the original data minus the eliminated row.
+    mdist<-stringdistmatrix(slice$umi, slice$umi, method = "lv")
+    losers<-vector()
+    for(i in 1:length(slice$umi)){
+      for(j in 1:length(slice$umi)){
+        if(i > j){
+          if(mdist[i,j]<ldthresh){
+            #print(paste0("i = ", i, "j = ", j))
+            loser<-which.min(c(slice$count[i], slice$count[j]))
+            losers<-c(losers, c(i,j)[loser])
+          }
+        }
+      }
+    }
+    if(length(losers)>0){
+      slice[-losers,]
+    }else{
+      slice
+    }
+  }
+  out<-pbmcapply::pbmclapply(unique(dat$cb), function(ucb){
+    slice<-dat[dat$cb %in% ucb,]
+    if(nrow(slice)>1){
+      slice<-LDfunc(slice)
+      slice<-countSlice(slice)
+    }else{
+      sl<-data.frame(cb=slice$cb, name=slice$name, setNames(as.list(rep(0, length(calls))), calls))
+      sl[,slice$call] <- 1
+      slice<-sl
+    }
+  })
+  out<-lapply(out, function(df) df[, nameslice, drop = FALSE]) #make sure there is no glitches in the colname ordering
+  out<-do.call(rbind, out)
+  out$cb<-paste(prefixes[n], out$cb, sep = "_")
+  out
+}
+alldat<-lapply(1:length(fs), get_data, 0)
+alldat<-do.call(rbind, alldat)
+alldat$cb<-paste0(alldat$cb, "-1")
+alldat$call<-"2_biallelic"
+alldat$call[alldat$ref==0]<-"3_mutant"
+alldat$call[alldat$query==0&alldat$other==0]<-"1_ref"
+alldat$mutcount<-alldat$query + alldat$other
+alldat$vaf<-(alldat$query + alldat$other)/(alldat$ref + alldat$query + alldat$other)
+table(alldat$vaf)
+table(alldat$mutcount)
+table(alldat$call)
+alldat$call[match(Cells(seu), alldat$cb)] %>% table()
+seu[[name[[snv]]]]<-alldat$call[match(Cells(seu), alldat$cb)]
+
+
+```
+
