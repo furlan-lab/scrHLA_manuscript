@@ -1,7 +1,7 @@
 ---
 title: "20250130_AML4d90_and_AML1_example_for_Figs_workflow"
-author: "SBK"
-date: "1/30/2025"
+author: "Sami B. Kanaan"
+date: "7/24/2025"
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -63,7 +63,6 @@ suppressPackageStartupMessages({
   library(scrHLAmatrix)
 })
 packageVersion("scrHLAmatrix")
-options(warn=-1) #to suppress warnings globaly. options(warn=0) to get them back
 
 ## color palette
 bmcolsl <- viewmastR::sfc(16)[c(1:3, 5:16)]
@@ -89,10 +88,15 @@ dirnames <- c("AML_F_5", "AML_E_5", "AML401_BM", "AML401_34")               # th
 
 ## Load Seurat
 ## Note: you can reconstruct any Seurat object from the barcodes.tsv, metadata.csv, features.tsv, and matrix.mtx files available in GEO
+
+## if 5' rds
 seu<-readRDS(file.path("/fh/fast/furlan_s/user/skanaan/scrHLAtyping/_R_ANALYSES/221128_PB__AtoD_EWS__EtoG_HLA__H_NUP98_TSOdepl/cds",
-                       "221010_AML101_addmutations.RDS")) # 5' rds
+                       "221010_AML101_addmutations.RDS"))
+
+# ## if 3' rds
 # seu<-readRDS(file.path("/fh/fast/furlan_s/user/skanaan/scrHLAtyping/_R_ANALYSES/231020_longreadTSO_HLA_MDS_DB_LA_MO_EWS/cds",
-#                        "220919_seuratObj_AML101_celltype_genotype.RDS")) # 3' rds
+#                        "220919_seuratObj_AML101_celltype_genotype.RDS"))
+# seu <- seu[,which(seu$dataset == "34_enrich")] # only the CD34+ fraction was HLA enriched
 
 ## Load the counts files
 cts <- HLA_load(directories = dirs, dir_names = dirnames, cell_data_obj = seu)
@@ -234,11 +238,21 @@ seu <- CreateSeuratObject(counts = expr_matrix, project = "AML4_d90")
 #make sure the metadata barcodes are the same as the seu barcodes
 identical(metadata, metadata[colnames(seu), , drop = F])
 seu <- AddMetaData(seu, metadata)
+#add ADT
+adt_matrix <- readMM(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_ADT_matrix.mtx.gz"))
+rownames(adt_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_ADT_features.tsv.gz"), header=F)$V1
+colnames(adt_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_barcodes.tsv.gz"), header=F)$V1
+seu@assays$ADT <- CreateAssayObject(counts = adt_matrix)
+#add the already saved HLAMAS-seq assay (the regular HLA assay will be generated below, for the sake of the example)
+mas_matrix <- readMM(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_HLAMAS_matrix.mtx.gz"))
+rownames(mas_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_HLAMAS_features.tsv.gz"), header=F)$V1
+colnames(mas_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_barcodes.tsv.gz"), header=F)$V1
+seu@assays$HLAMAS <- CreateAssayObject(counts = mas_matrix)
 #if UMAP backed up in metadata, use them:
 umap_df <- data.frame(seu$UMAP_1_backup, seu$UMAP_2_backup)
 colnames(umap_df) <- c(1,2)
 seu@reductions$umap <- CreateDimReducObject(embeddings = as.matrix(umap_df), key = "umap_")
-rm(expr_matrix, metadata, umap_df)
+rm(expr_matrix, metadata, umap_df, adt_matrix, mas_matrix)
 
 samples<-unique(sapply(colnames(seu), function(i){
   i<-strsplit(i, "_")
@@ -560,7 +574,7 @@ rm(longer_df) # it will be recreated in another section.
 
 #------ Fig.3c ------#
 CT <- 3
-ct <- levels(sort(unique(seu@meta.data$celltype)))
+ct <- levels(as.factor(sort(unique(seu@meta.data$celltype))))
 ct[CT]
 {
   longer_df <- list()
@@ -645,6 +659,7 @@ DimPlot_scCustom(seu, group.by = "celltype", colors_use = bmcolsl, pt.size = 0.4
 
 #------ Fig.4c, Suppl.Fig.S12c ------#
 pal_malig <- c(Don_Healthy = "grey85", Rcp_Healthy = "red", Rcp_Malignant ="violetred4")
+seu@active.ident <- as.factor(seu$malignant)
 seu@active.ident
 DimPlot_scCustom(seu, group.by = "malignant", reduction = "umap", pt.size=0.4, shuffle = T, seed = 100) +scale_color_manual(values= pal_malig, drop=F) # drop=F to show a level in legend even if it is unused in the plot (4in x 6in)
 
@@ -655,8 +670,8 @@ Idents(seu) <- factor(Idents(seu), levels = old.lvl)
 rm(old.lvl)
 # run this chunk to generate the figure
 {
-  av.expr1 <- assay(muscat::aggregateData(as.SingleCellExperiment(seu), by = c("ident"), fun = "mean")) %>% as.data.frame() %>% suppressWarnings() 
-  av.expr2 <- assay(muscat::aggregateData(as.SingleCellExperiment(seu), by = c("ident"), fun = "prop.detected")) %>% as.data.frame() %>% suppressWarnings()
+  av.expr1 <- SummarizedExperiment::assay(muscat::aggregateData(as.SingleCellExperiment(seu), by = c("ident"), fun = "mean")) %>% as.data.frame() %>% suppressWarnings() 
+  av.expr2 <- SummarizedExperiment::assay(muscat::aggregateData(as.SingleCellExperiment(seu), by = c("ident"), fun = "prop.detected")) %>% as.data.frame() %>% suppressWarnings()
   if (length(colnames(av.expr1)) < length(levels(Idents(seu)))) { #check if levels of seu idents are equal to the cols in the av.expr dataframes
     av.expr1[, setdiff(levels(Idents(seu)), colnames(av.expr1))] <- 0 #force the missing levels as a col with data at no value (zeros)
     av.expr1 <- av.expr1[ , levels(Idents(seu))]
@@ -892,6 +907,393 @@ Idents(seu)<-seu$geno
     theme(axis.line=element_blank(), axis.title.x=element_blank(),
           axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) # 3 x 3 in
 }
+```
+
+## Fig. 5
+# Using RSAMTOOLS, BIOCONDUCTOR, and MERGBAMR to VISUALIZE HLA ALIGNMENTS
+# Match DNA on chromosome 6 of hg38
+
+```{r}
+
+#------ Fig. 5a & 5b ------#
+# if not already
+#remotes::install_github("https://github.com/furlan-lab/BSgenome.Hsapiens.scrHLAtyping.imgtHLA")
+
+suppressPackageStartupMessages({
+  library(mergebamsR)
+  library(Rsamtools)
+  library(GenomicAlignments)
+  library(GenomeInfoDb)
+  library(BSgenome) 
+  library(dplyr)
+  library(ggbio)
+  library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+  library(BSgenome.Hsapiens.scrHLAtyping.imgtHLA)
+})
+options(ucscChromosomeNames = FALSE)
+
+# creating an temporary out path for our merged bams
+outpath<-"/hpc/temp/furlan_s/skanaan"
+
+samples<-unique(sapply(colnames(seu), function(i){
+  i<-strsplit(i, "_")
+  paste(i[[1]][1:length(i[[1]])-1], collapse = "_")  
+}))
+
+## what is the base sample name?
+longest_common_substring <- function(strs) {
+  # pick the shortest string as a base
+  base <- strs[[which.min(nchar(strs))]]
+  n    <- nchar(base)
+  # check all substrings from longest to shortest
+  for(len in seq(n, 1)) {
+    for(start in seq_len(n - len + 1)) {
+      candidate <- substr(base, start, start + len - 1)
+      if (all(vapply(strs, \(s) grepl(candidate, s, fixed = TRUE), logical(1))))
+        return(candidate)
+    }
+  }
+  return("")  # no common substring
+}
+
+## Match the patient names with their respective count data directories
+dirs_path <- "/fh/fast/furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401/pacbio_isoseq_scrHLAtag_out"
+dirs<-list.dirs(path=dirs_path, full.names = T, recursive = F)
+dirs<- lapply(dirs, list.dirs, recursive = F) %>% unlist
+dirs<- lapply(dirs, dir, pattern = "^guid", recursive = F, full.names = T) %>% unlist
+names(dirs) <- c("AML401_BM", "AML401_34") # this is how the samples were organized in the directories
+
+bams<- lapply(dirs, dir, pattern = "Aligned_mm2_sorted_mRNA\\.bam$", recursive = F, full.names = T) %>% unlist # `\\.` escaping the dot to mean litteral dot, `$` to anchor the end of the string so the index files `.bam.bai` no longer match
+bams<- lapply(1:length(samples), function(x) bams[which.min(stringdist::stringdist(samples[x], names(bams), method = "lv"))]) %>% unlist
+bams
+
+# Make sure the bams are formatted correctly, the "CB" tag must be present
+peekbam(bam = bams[1], field = "tag", TAG = "CB", n=10)
+peekbam(bam = bams[2], field = "tag", TAG = "CB", n=10)
+
+## Merge bams
+seu_cb_sepr <- "_"
+seu_cb_sufx <- "-1"
+mergebams(bams = c(bams[1], bams[2]), out_path = outpath, prefixes = paste0(samples, seu_cb_sepr))
+peekbam(bam = paste0(outpath, "/out_path.bam"), field = "tag", TAG = "CB", n=10)
+Rsamtools::sortBam(paste0(outpath, "/out_path.bam"), destination = sub("\\.bam$", ".sorted", paste0(outpath, "/out_path.bam")))
+Rsamtools::indexBam(paste0(outpath, "/out_path.sorted.bam"))
+
+## Subset bams according to Seurat clsssifications
+# seu@active.ident <- as.factor(seu$geno)
+seu@active.ident
+levels(seu)
+mismatch_patterns <- lapply(1:length(levels(seu)), function(mal) {
+  #mal <- 3
+  ft <- colnames(seu[ , rownames(seu@meta.data)[seu@active.ident == levels(seu)[mal]]])
+  suf <- seu_cb_sufx
+  ft <- sub(paste0(suf, "$"), "", ft) #paste0(suf, "$") builds the regex "-1$" (i.e. '-1' at end of string)
+  if (file.exists(paste0(outpath, "/merged_subset_by_feat.bam"))) {
+    file.remove(paste0(outpath, "/merged_subset_by_feat.bam"))
+  }
+  subsetbam(
+    inputbam = paste0(outpath, "/out_path.sorted.bam"),
+    features = list(ft),
+    outputbams = paste0(outpath, "/merged_subset_by_feat.bam"),
+    field = "tag", dump_bam = NA, TAG = "CB",
+    cores = 1, verbose = T, split_bam = F
+  )
+  Rsamtools::countBam(paste0(outpath, "/merged_subset_by_feat.bam"))$records
+  Rsamtools::indexBam(paste0(outpath, "/merged_subset_by_feat.bam"))
+  
+  #Set up your working Bam file and reference fasta:
+  bam_path <- paste0(outpath, "/merged_subset_by_feat.bam")
+  reads <- readGAlignments(bam_path)
+  mismatch_data <- pbmcapply::pbmclapply(1:length(levels(reads@seqnames@values)), function(x){
+    ctg <- levels(reads@seqnames@values)[x]
+    window <- GRanges(ctg, IRanges(1, seqlengths(BSgenome.Hsapiens.scrHLAtyping.imgtHLA)[ctg]))
+    pp <- PileupParam(
+      distinguish_nucleotides = TRUE,
+      distinguish_strands = FALSE,
+      min_base_quality = 0, 
+      include_deletions = TRUE,
+      include_insertions = TRUE,
+      max_depth = 1e5
+    )
+    pu <- pileup(
+      file = bam_path,
+      scanBamParam = ScanBamParam(which=window),
+      pileupParam = pp
+    )
+    ref_seq <- BSgenome.Hsapiens.scrHLAtyping.imgtHLA[[ctg]]#[ start(window):end(window) ] #if only part of a seq is needed
+    ref_bases <- strsplit(as.character(ref_seq), split="")[[1]]
+    mismatch_df <- pu %>%
+      group_by(pos) %>%
+      summarise(
+        depth = sum(count, na.rm=TRUE),
+        mismatches = sum(count[nucleotide != ref_bases[pos]], na.rm=TRUE)
+      ) %>%
+      mutate(rate = mismatches / depth)
+    # classify indels and mismatches
+    pu2 <- pu %>%
+      mutate(type = case_when(
+        nucleotide == "-" ~ "deletion",
+        nucleotide == "+" ~ "insertion",
+        nucleotide %in% c("A","C","G","T") &
+          nucleotide != ref_bases[pos] ~ "substitution",
+        nucleotide %in% c("A","C","G","T") &
+          nucleotide == ref_bases[pos] ~ "_match",
+        TRUE ~ NA_character_
+      )) %>%
+      filter(!is.na(type))
+    # compute rates:
+    rate_df <- pu2 %>%
+      group_by(pos, type) %>%
+      summarise(count = sum(count), .groups="drop") %>%
+      group_by(pos) %>%
+      mutate(depth = sum(count), rate = count / depth) %>%
+      ungroup()
+    rate_df$sample <- longest_common_substring(samples)
+    rate_df$subsample <- levels(seu)[mal]
+    rate_df$allele <- gsub("\\|", "*", ctg)
+    sn <- seqnames(reads) %>% as.data.frame()
+    if (ctg %in% sn$value) {
+      p_cov <- autoplot(
+        BamFile(bam_path),
+        stat = "coverage",
+        which = window,
+        geom = "bar"
+      ) + ggthemes::theme_few()
+      p_cov <- p_cov@ggplot[["layers"]][[1]][["data"]]
+      p_cov$seqnames <- gsub("\\|", "*", p_cov$seqnames)
+    } else {
+      p_cov <- NULL
+    }
+    return(list(pu = rate_df, cov = p_cov))
+  }, mc.cores = parallel::detectCores())
+  mm <- lapply(mismatch_data, `[[`, 1)
+  mm <- do.call("rbind", mm)
+  covl <- lapply(mismatch_data, `[[`, 2)
+  covl <- covl[!sapply(covl, is.null)]
+  covl <- do.call("rbind", covl)
+  rownames(covl) <- NULL
+  return(list(pileup = mm, coverage = covl))
+})
+coverage_patterns <- lapply(mismatch_patterns, `[[`, 2)
+mismatch_patterns <- lapply(mismatch_patterns, `[[`, 1)
+names(mismatch_patterns) <- sapply(mismatch_patterns, function(df) unique(df$subsample))
+names(coverage_patterns) <- names(mismatch_patterns)
+
+dn # list of donor specific alleles
+rp # list of recip specific alleles 
+ch <- list(dn=dn, rp=rp, rp=rp) # follow the naming convention in `mismatch_patterns`
+sh <- gsub("-", "\\*", row.names(seu))
+sh <- sh[! sh %in% c(rp, dn)] #shared alleles
+
+d <- 1
+al <- c(ch[[d]], sh)
+# al <- c(ch[[d]], sh)[1]
+p_var_sub <- ggplot(mismatch_patterns[[d]][which(mismatch_patterns[[d]]$allele %in% al ),], aes(x = pos, y = rate, fill = type)) +
+  geom_col(colour = NA, alpha = 1, width = 1.1) +
+  scale_fill_manual(values = c(substitution = "forestgreen", insertion = "blue", deletion = "red", `_match` = "gray95")) +
+  scale_y_continuous(labels = scales::percent_format(1), expand = expansion(mult = c(.01, .01))) +
+  # labs(title = paste("Variants in reads mapped to", gsub("\\|", "*", ctg)), x = "Position", y = "% reads with variant", fill = "Type" ) +
+  facet_wrap( ~ allele, scales = "free_x") +
+  scale_x_continuous(expand = expansion(mult = c(.01, .01)))+
+  # scale_y_continuous(expand = expansion(mult = c(.01, .01)))+
+  ggthemes::theme_few() +
+  theme(panel.border = element_rect(colour = "black", size = .1, fill = NA))
+p_var_sub
+
+p_cov <- ggplot(coverage_patterns[[d]][which(coverage_patterns[[d]]$seqnames %in% al ),], aes(x = seqs, y = coverage)) +
+  geom_col(fill = "#6A3D9A", colour = NA, alpha = 1, width = 1.1) +
+  facet_wrap( ~ seqnames, scales = "free") +
+  scale_x_continuous(expand = expansion(mult = c(.01, .01)))+
+  scale_y_continuous(expand = expansion(mult = c(.03, .03)))+
+  ggthemes::theme_few() +
+  theme(panel.border = element_rect(colour = "black", size = .1, fill = NA), axis.text.x = element_blank(), axis.title.x = element_blank())
+p_cov
+
+
+#------ Fig. 5c ------#
+
+## while exploring the scrHLAtag bam files from AML8, we identify this sequence as an unususally frequent insertion:
+seq18 <- DNAString("AGGTGGAGAAGGGGTGAA") 
+
+#is it possible it is part of the HLA loci? let's download the hg38 part that has HLA: chromosome 6
+options(timeout = 600)
+download.file(
+  "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/chromosomes/chr6.fa.gz",
+  "chr6.fa.gz"
+)
+chr6 <- readDNAStringSet("chr6.fa.gz")
+hits_list <- vmatchPattern(seq18, chr6, max.mismatch = 0)
+hits_list
+chr <- "6"   # "6" Ensembl style "chr6" USCS style
+names(chr6) <- chr   
+
+# extract the matches for the first (and only) element:
+hits <- hits_list[[1]]
+df <- as.data.frame(hits)
+df$seqnames <- names(chr6)
+
+# define your window
+hit.start <- df$start
+hit.end <- df$end
+upstream <- hit.start - 10
+downstream <- hit.end + 10
+region <- GRanges(chr, IRanges(upstream, downstream))
+
+gtf_url <- "ftp://ftp.ensembl.org/pub/release-112/gtf/homo_sapiens/Homo_sapiens.GRCh38.112.gtf.gz"
+gtf_dest <- file.path("/fh/fast/furlan_s/user/skanaan/temp/Homo_sapiens.GRCh38.112.gtf.gz")
+download.file(gtf_url, gtf_dest, mode = "wb") #download only once
+#grabbing all transcripts overlapping a specific region
+region <- GRanges(
+  seqnames = "6",
+  ranges = IRanges(start = 29942532, end = 29945870)
+)
+gtf <- import(gtf_dest, format="gtf", which=region)
+txdb <- makeTxDbFromGFF(gtf_dest, format="gtf")
+
+all_txs <- transcripts(
+  txdb,
+  columns = c("tx_id","gene_id"),   # pull whatever metadata you like
+  use.names = TRUE
+)
+tx_hits <- subsetByOverlaps(all_txs, region)
+tx_feats <- gtf[gtf$type == "transcript"]
+tx_feats <- as.data.frame(tx_feats)
+
+#expanding by exon
+exon_ranges <- pbmcapply::pbmclapply(1:nrow(tx_feats), function(t) {
+  ex_gr   <- exonsBy(txdb, by="tx", use.names=TRUE)[[ tx_feats$transcript_id[t] ]]
+  ex_gr <- as.data.frame(ex_gr)
+  ex_gr$mRNA.part <- "coding"
+  utr5_gr <- fiveUTRsByTranscript(txdb, use.names=TRUE)[[ tx_feats$transcript_id[t] ]]
+  if (is.null(utr5_gr)) {
+    utr5_gr <- setNames(data.frame(matrix(nrow = 0, ncol = length(colnames(ex_gr)))), colnames(ex_gr))
+  } else {
+    utr5_gr <- as.data.frame(utr5_gr)
+    utr5_gr$mRNA.part <- "5UTR"
+  }
+  utr3_gr <- threeUTRsByTranscript(txdb, use.names=TRUE)[[ tx_feats$transcript_id[t] ]]
+  if (is.null(utr3_gr)) {
+    utr3_gr <- setNames(data.frame(matrix(nrow = 0, ncol = length(colnames(ex_gr)))), colnames(ex_gr))
+  } else {
+    utr3_gr <- as.data.frame(utr3_gr)
+    utr3_gr$mRNA.part <- "3UTR"
+  }
+  ex_gr <- do.call("rbind", list(ex_gr, utr5_gr, utr3_gr))
+  ex_gr$transcript_id <- tx_feats$transcript_id[t]
+  ex_gr$transcript_biotype <- tx_feats$transcript_biotype[t]
+  ex_gr$tag <- tx_feats$tag[t]
+  ex_gr$gene.start <- tx_feats$start[t]
+  ex_gr$gene.end <- tx_feats$end[t]
+  ex_gr$order_in_df <- t
+  return(ex_gr)
+}, mc.cores = parallel::detectCores())
+exon_ranges <- do.call("rbind", exon_ranges)
+exon_ranges$transcript_biotype <- with(exon_ranges, ifelse(!is.na(tag) & tag == "MANE_Select", paste0(transcript_biotype, ";MANE_tag"), transcript_biotype))
+
+# set our zoom coordinates 
+zoom.min <- exon_ranges$start[which.min(exon_ranges$start)]
+zoom.max <- exon_ranges$end[which.max(exon_ranges$end)]
+
+# draw your HLA-A gene
+# tick positions to represent introns
+exon_ranges2 <- exon_ranges[which(exon_ranges$mRNA.part == "coding"),]
+exon_rangesutr <- exon_ranges[which(exon_ranges$mRNA.part %in% c("5UTR", "3UTR")),]
+tick_df <- exon_ranges2 %>%
+  group_by(transcript_id, order_in_df, strand) %>%
+  filter(n() > 1) %>%
+  arrange(exon_rank, .by_group=TRUE) %>%
+  mutate(next_start = lead(start),
+         curr_end   = end) %>%
+  filter(!is.na(next_start)) %>%
+  ungroup() %>%
+  transmute(
+    order_in_df,
+    strand,
+    tick_pos = (curr_end + next_start) / 2,
+    tick_end = tick_pos + ifelse(strand == "+", 10, -10)
+  )
+# Plot
+h <- 0.3 #box hight
+p1 <- ggplot() +
+  # introns
+  geom_segment(data=distinct(exon_ranges2, order_in_df, gene.start, gene.end),
+               aes(x=gene.start, xend=gene.end, y=order_in_df, yend=order_in_df),
+               size=0.1, color = "grey40") +
+  # positive or neg strand arrow ticks
+  geom_segment(data=tick_df,
+               aes(x=tick_pos, xend=tick_end, y=order_in_df, yend=order_in_df),
+               arrow=arrow(length=grid::unit(0.1,"lines"), type="closed"),
+               color = "grey40") +
+  # exon rectangles
+  geom_rect(data=exon_ranges2,
+            aes(xmin=start, xmax=end, ymin=order_in_df-h, ymax=order_in_df+h, fill=transcript_biotype),
+            color = "gray40", size = 0.1) +
+  ## UTR rectangles
+  geom_rect(data=exon_rangesutr,
+            aes(xmin=start, xmax=end, ymin=order_in_df-h, ymax=order_in_df+h, alpha = "UTR"), 
+            fill = "gray95", color = "gray40", size = 0.1) +
+  scale_y_continuous(breaks=unique(exon_ranges$order_in_df),
+                     labels=unique(exon_ranges$transcript_id)) +
+  scale_fill_manual(values = c(
+    unprocessed_pseudogene = "#702082",
+    protein_coding = "#00274C",
+    retained_intron = "#2F65A7",
+    nonsense_mediated_decay = "#00B2A9",
+    `protein_coding;MANE_tag` = "#FFCB05"
+  )) +
+  scale_alpha_manual(
+    name = NULL, 
+    values = c(UTR = 1),  # full opacity
+    guide  = guide_legend(override.aes = list(fill= "gray95", color= "gray40", alpha= 1, size= 0.1 ))
+  ) +
+  theme_minimal() +
+  theme(
+    # legend.position = "none",
+    axis.title.y = element_blank(),
+    axis.line.x = element_line(linewidth = 0.25),
+    axis.ticks.x = element_line(linewidth = 0.25),
+    panel.grid = element_blank()
+  )+
+  xlab("chr6 coordinate (hg38 / Ensembl release-112)")
+p1
+
+## now zoooooom in on the target sequence: first split to bases and positions
+# set new zoom coordinates 
+zoom.min <- upstream
+zoom.max <- downstream
+yzoom <- exon_ranges$order_in_df[which(exon_ranges$tag == "MANE_Select")][1]
+
+full_seq   <- as.character(subseq(chr6, upstream, downstream))
+bases <- strsplit(full_seq, "")[[1]]
+positions <- upstream:downstream
+seq_df <- data.frame(pos = positions-.5, base = bases, stringsAsFactors = FALSE)
+
+gg<- ggplot(seq_df, aes(x = pos, y = 1, label = base, colour = base)) +
+  annotate("rect", xmin = hit.start-1, xmax = hit.end, 
+           ymin = 0.8, ymax = 1.2, fill = "#628395", alpha = 0.2) +
+  geom_text(size = 3, fontface = "bold") +
+  scale_colour_manual(values = c(A = "forestgreen", C = "#00A5CF", G = "firebrick", T = "#FE6900") ) +
+  scale_y_continuous(expand = expansion(0)) +
+  scale_x_continuous(name = "chr6 (hg38) coordinate",
+                     breaks = seq(from = upstream, to = downstream, length.out = 5)) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.y = element_blank(),
+    panel.grid = element_blank()
+  )+
+  coord_cartesian(xlim = c(zoom.min, zoom.max)) #zooming on this area
+
+p2 <- p1+ coord_cartesian(xlim = c(zoom.min, zoom.max), ylim = c(yzoom-2.5, yzoom+.5)) #zooming on this area
+cowplot::plot_grid(gg, NULL, p2, ncol = 1, rel_heights = c(1, -0.3, 3), align = "v", axis = "bt")
+
+
+#------ Fig. 5d & 5e ------#
+DimPlot_scCustom(seu, group.by = "malignant", reduction = "umap", pt.size=0.4, shuffle = T, seed = 100) +scale_color_manual(values= pal_malig, drop=F) # drop=F to show a level in legend even if it is unused in the plot (4in x 6in)
+
 ```
 
 ## Suppl.Fig.S1

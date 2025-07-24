@@ -11,7 +11,7 @@ editor_options:
 ## SECTION 1: set up virtual environment for isoseq, do this once and you're all set!
 ## version 4.0.0 and above should work for Revio sequencing data; isoseq3 works for Sequel IIe data
 
-```bash
+```{bash}
 ##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
 
 export PATH=/home/skanaan/.conda/envs/isoseq/bin/python:$PATH
@@ -75,7 +75,7 @@ conda deactivate
 ```
 ## SECTION 2: Running IsoSeq pipline on PacBio HLA pulldown HiFi reads
 
-```bash
+```{bash}
 ##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
 
 #environment
@@ -156,7 +156,7 @@ conda deactivate
 ```
 ## SECTION 3: Run scrHLAtag (1st unsupervised iteration)
 
-```bash
+```{bash}
 ##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
 
 ## if you haven't already, install scrHLAtag (do this once!)
@@ -188,7 +188,7 @@ squeue -u skanaan
 ```
 ## SECTION 4: SETTING UP ENVIRONMENT in R
 
-```r
+```{r}
 graphics.off()
 rm(list=ls())
 knitr::opts_chunk$set(fig.width=8, fig.height=6,dpi=300,
@@ -257,7 +257,7 @@ names(bmcolsl)<-c("01_HSC", "02_Early_Erythroid","03_Late_Erythroid","04_Myeloid
 ```
 ## SECTION 5: LOAD SEURAT DATA AND scrHLAtag PROCESSED DATA in R
 
-```r
+```{r}
 ## You can reconstruct any Seurat object from the barcodes.tsv, metadata.csv, features.tsv, and matrix.mtx files available in GEO
 expr_matrix <- readMM(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_matrix.mtx.gz"))
 rownames(expr_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_features.tsv.gz"), header=F)$V1
@@ -294,13 +294,13 @@ cts <- HLA_load(directories = dirs, dir_names = dirnames, cell_data_obj = seu)
 top_alleles <- Top_HLA_list(reads_1 = cts[["mRNA"]], reads_2 = cts[["gene"]], k = 2, cell_data_obj = seu, suppress_plots = F)
 
 ## write new 'alleles' file
-write(top_alleles, file.path(dirs_path, paste0(substr(samples[1],1,nchar(samples[1])-3), "_guided", "_top_alleles.csv")))
+write(top_alleles[["top_alleles"]], file.path(dirs_path, paste0(substr(samples[1],1,nchar(samples[1])-3), "_guided", "_top_alleles.csv")))
 
 ## That's it!.. time for another scrHLAtag iteration.
 ```
 ## SECTION 6: Run scrHLAtag (2nd or later iteration(s) guided by HLA top allele candidates)
 
-```bash
+```{bash}
 ##### Use OPTION+COMMAND+RETURN to send commands to 'Terminal' #####
 
 ## load modules
@@ -332,10 +332,75 @@ done
 squeue -u skanaan
 
 ## Repeat SECTION 5, then SECTION 6 again for a total of ~4~5 iterations, until the `Top_HLA_list()` function tells you it was the final iteration 
+
+
+## Important Note ##
+# in older versions of `scrHLAtag`, the CB and UMI tags are missing from the scrHLAtag output BAM files
+# there is a script to "add those back" to the original bam files
+# This will be extremely useful later for merging bams and/or subsetting bams based on CBs
+
+## find all the bams output from scrHLAtag
+search_dir="${1:-/fh/fast//furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401}" 
+# use mapfile to read the results of find into an array
+mapfile -t bam_paths < <(
+  find "$search_dir" -type f \( \
+    -name "Aligned_mm2_sorted_mRNA.bam" \
+  \)
+)
+# bam_paths now holds all matching files
+echo "Found ${#bam_paths[@]} BAM(s):"
+for bam in "${bam_paths[@]}"; do
+  echo "  $bam"
+done
+
+# you can loop through all or part of the array
+start_index=0 # first index is 0 because array indices are zero-based
+end_index=$((${#bam_paths[@]} - 1)) # -1 because array indices are zero-based
+
+for ((i=start_index; i<=end_index; i++)); do
+    export ibam="${bam_paths[i]}"
+    export in_dir=$(dirname "$ibam")
+    cd "$in_dir"
+    sbatch -n 1 -c 1 -p campus-new --mem-per-cpu=21000MB \
+      --wrap="~/develop/scrHLAtag/target/release/addback -b $ibam \
+      && mv out.bam $ibam \
+      && samtools index $ibam"
+done
+squeue -u skanaan
+
+# after "mRNA", do the same for the "gene" output
+search_dir="${1:-/fh/fast//furlan_s/user/skanaan/scrHLAtyping/WorkFlowTest_AML401}" 
+# use mapfile to read the results of find into an array
+mapfile -t bam_paths < <(
+  find "$search_dir" -type f \( \
+    -name "Aligned_mm2_sorted_gene.bam" \
+  \)
+)
+# bam_paths now holds all matching files
+echo "Found ${#bam_paths[@]} BAM(s):"
+for bam in "${bam_paths[@]}"; do
+  echo "  $bam"
+done
+
+# you can loop through all or part of the array
+start_index=0 # first index is 0 because array indices are zero-based
+end_index=$((${#bam_paths[@]} - 1)) # -1 because array indices are zero-based
+
+for ((i=start_index; i<=end_index; i++)); do
+    export ibam="${bam_paths[i]}"
+    export in_dir=$(dirname "$ibam")
+    cd "$in_dir"
+    sbatch -n 1 -c 1 -p campus-new --mem-per-cpu=21000MB \
+      --wrap="~/develop/scrHLAtag/target/release/addback -b $ibam \
+      && mv out.bam $ibam \
+      && samtools index $ibam"
+done
+squeue -u skanaan
+# that's it!
 ```
 ## SECTION 7: Creating the HLA matrix in the Seurat embedding 
 
-```r
+```{r}
 ## You can reconstruct any Seurat object from the barcodes.tsv, metadata.csv, features.tsv, and matrix.mtx files available in GEO
 expr_matrix <- readMM(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_matrix.mtx.gz"))
 rownames(expr_matrix) <- fread(file.path(CDS_DIR, "AML4_d90_merged_Seurat_QCed_RNA_features.tsv.gz"), header=F)$V1
