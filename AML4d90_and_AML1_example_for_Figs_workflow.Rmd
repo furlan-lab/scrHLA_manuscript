@@ -917,7 +917,7 @@ Idents(seu)<-seu$geno
 
 #------ Fig. 5a & 5b ------#
 # if not already
-#remotes::install_github("https://github.com/furlan-lab/BSgenome.Hsapiens.scrHLAtyping.imgtHLA")
+remotes::install_github("https://github.com/furlan-lab/BSgenome.Hsapiens.scrHLAtyping.imgtHLA")
 
 suppressPackageStartupMessages({
   library(mergebamsR)
@@ -983,10 +983,10 @@ Rsamtools::indexBam(paste0(outpath, "/out_path.sorted.bam"))
 # seu@active.ident <- as.factor(seu$geno)
 seu@active.ident
 levels(seu)
+seu@active.ident <- as.factor(as.character(seu$malignant))
 mismatch_patterns <- lapply(1:length(levels(seu)), function(mal) {
-  #mal <- 3
   ft <- colnames(seu[ , rownames(seu@meta.data)[seu@active.ident == levels(seu)[mal]]])
-  suf <- seu_cb_sufx
+  suf <- unique(seu_cb$sufx)
   ft <- sub(paste0(suf, "$"), "", ft) #paste0(suf, "$") builds the regex "-1$" (i.e. '-1' at end of string)
   if (file.exists(paste0(outpath, "/merged_subset_by_feat.bam"))) {
     file.remove(paste0(outpath, "/merged_subset_by_feat.bam"))
@@ -1010,25 +1010,18 @@ mismatch_patterns <- lapply(1:length(levels(seu)), function(mal) {
     pp <- PileupParam(
       distinguish_nucleotides = TRUE,
       distinguish_strands = FALSE,
-      min_base_quality = 0, 
+      min_base_quality = 0, # =0 so nothing blows up
       include_deletions = TRUE,
       include_insertions = TRUE,
-      max_depth = 1e5
+      max_depth = 1e7
     )
     pu <- pileup(
       file = bam_path,
       scanBamParam = ScanBamParam(which=window),
       pileupParam = pp
     )
-    ref_seq <- BSgenome.Hsapiens.scrHLAtyping.imgtHLA[[ctg]]#[ start(window):end(window) ] #if only part of a seq is needed
+    ref_seq <- BSgenome.Hsapiens.scrHLAtyping.imgtHLA[[ctg]]
     ref_bases <- strsplit(as.character(ref_seq), split="")[[1]]
-    mismatch_df <- pu %>%
-      group_by(pos) %>%
-      summarise(
-        depth = sum(count, na.rm=TRUE),
-        mismatches = sum(count[nucleotide != ref_bases[pos]], na.rm=TRUE)
-      ) %>%
-      mutate(rate = mismatches / depth)
     # classify indels and mismatches
     pu2 <- pu %>%
       mutate(type = case_when(
@@ -1039,14 +1032,19 @@ mismatch_patterns <- lapply(1:length(levels(seu)), function(mal) {
         nucleotide %in% c("A","C","G","T") &
           nucleotide == ref_bases[pos] ~ "_match",
         TRUE ~ NA_character_
-      )) %>%
-      filter(!is.na(type))
+      )) 
+    pu2$type[is.na(pu2$type)] <- "ambiguous"
+    # aligners 'anchor' insertions to the preceding ref base, so match and ins may happen at same position. to avoid double count:
+    ins_by_pos <- pu2[which(pu2$type == "insertion"),]
+    pu2$ins_count <- ins_by_pos$count[match(pu2$pos, ins_by_pos$pos)]
+    pu2$ins_count[is.na(pu2$ins_count)] <- 0
+    pu2$count_adj <- pu2$count - as.numeric(pu2$type == "_match") * pu2$ins_count #TRUE coerces to 1 and FALSE to 0
     # compute rates:
     rate_df <- pu2 %>%
       group_by(pos, type) %>%
-      summarise(count = sum(count), .groups="drop") %>%
+      summarise(count_adj = sum(count_adj), .groups="drop") %>%
       group_by(pos) %>%
-      mutate(depth = sum(count), rate = count / depth) %>%
+      mutate(depth = sum(count_adj), rate = count_adj / depth) %>%
       ungroup()
     rate_df$sample <- longest_common_substring(samples)
     rate_df$subsample <- levels(seu)[mal]
@@ -1078,6 +1076,7 @@ coverage_patterns <- lapply(mismatch_patterns, `[[`, 2)
 mismatch_patterns <- lapply(mismatch_patterns, `[[`, 1)
 names(mismatch_patterns) <- sapply(mismatch_patterns, function(df) unique(df$subsample))
 names(coverage_patterns) <- names(mismatch_patterns)
+
 
 dn # list of donor specific alleles
 rp # list of recip specific alleles 
@@ -1213,7 +1212,7 @@ tick_df <- exon_ranges2 %>%
     tick_end = tick_pos + ifelse(strand == "+", 10, -10)
   )
 # Plot
-h <- 0.3 #box hight
+h <- 0.3 #box height
 p1 <- ggplot() +
   # introns
   geom_segment(data=distinct(exon_ranges2, order_in_df, gene.start, gene.end),
