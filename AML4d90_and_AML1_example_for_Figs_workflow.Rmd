@@ -1300,7 +1300,7 @@ DimPlot_scCustom(seu, group.by = "malignant", reduction = "umap", pt.size=0.4, s
 
 ```{r}
 
-### Details in a separate notebook: "AML1_Bash_and_R_analysis_shortread_mutations.Rmd" ###
+### Details in a separate notebook at: https://github.com/furlan-lab/scrHLA_manuscript/blob/main/AML1_Bash_and_R_analysis_shortread_mutations.Rmd ###
 
 ```
 
@@ -1744,7 +1744,7 @@ Stacked_VlnPlot(seu, features = c("HOXA3", "HOXA4", "HOXA5", "HOXA7", "HOXA9", "
 
 ```{r}
 
-### Details in a separate notebook: "AML4d90_example_for_GeneFusion_workflow.Rmd" ###
+### Details in a separate notebook at: https://github.com/furlan-lab/scrHLA_manuscript/blob/main/AML4d90_example_for_GeneFusion_workflow.Rmd ###
 
 ```
 
@@ -1753,7 +1753,7 @@ Stacked_VlnPlot(seu, features = c("HOXA3", "HOXA4", "HOXA5", "HOXA7", "HOXA9", "
 
 ```{r}
 
-### Details in a separate notebook: "insilico_mixes_withFigs.Rmd" ###
+### Details in a separate notebook at: https://github.com/furlan-lab/scrHLA_manuscript/blob/main/insilico_mixes_withFigs.Rmd ###
 
 ```
 
